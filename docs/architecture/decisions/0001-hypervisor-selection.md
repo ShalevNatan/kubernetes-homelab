@@ -31,7 +31,7 @@ The home lab requires a Type-2 hypervisor to run multiple Ubuntu Server VMs on a
 - **Performance:** Acceptable overhead for development/learning workloads
 - **Stability:** Reliable operation during long-running experiments
 - **Operational workflow:** Snapshot/clone capabilities for rapid experimentation
-- **Cost:** Already licensed (VMware Workstation Pro available)
+
 
 ---
 
@@ -78,7 +78,7 @@ In practice, VMware's snapshot and networking model matched how I iterate and re
 
 - ℹ️ **Different from production:** Most production K8s runs on bare metal or Type-1 hypervisors (KVM, ESXi)
 - ℹ️ **Platform dependency:** Lab architecture tied to Windows host environment
-- ℹ️ **Licensing cost:** VMware Workstation Pro is paid software (already owned)
+
 
 ---
 
