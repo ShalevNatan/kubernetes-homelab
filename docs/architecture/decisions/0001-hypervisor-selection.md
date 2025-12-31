@@ -1,6 +1,6 @@
 # 1. Hypervisor Selection - VMware Workstation Pro (WHP Mode)
 
-**Date:** 2024-12-29  
+**Date:** 2025-12-31  
 **Status:** Accepted  
 **Deciders:** Shalev Natan  
 **Tags:** #infrastructure #hypervisor #vmware #foundation
@@ -155,7 +155,7 @@ While technically superior in performance, Hyper-V's operational friction during
 3. Configured global memory reservation (48GB for VMs)
 4. Set VM storage location (D:\VMs for dedicated NVMe space)
 
-**Timeline:** Implemented December 2024 (Stage 1)
+**Timeline:** Implemented December 2025 (Stage 1)
 
 **Dependencies:** None (foundational decision)
 
