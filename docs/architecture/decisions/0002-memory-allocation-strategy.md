@@ -272,15 +272,11 @@ Get-WmiObject Win32_OperatingSystem |
 
 **Potential adjustments:**
 
-1. **If workers are memory-constrained:**
-   - Reduce host reserve to 12GB (risky but possible)
-   - Add 4th worker at 12GB (total: 60GB for VMs)
-
-2. **If control plane is oversized:**
+1. **If control plane is oversized:**
    - Consider reducing master to 12GB
-   - Reallocate 4GB to workers (14GB each)
+   - Reallocate 4GB to workers (14GB total each)
 
-3. **If host needs more:**
+2. **If host needs more:**
    - Reduce each VM node to 14GB (42GB total)
    - Increase host reserve to 22GB
 
