@@ -56,7 +56,7 @@ The Kubernetes cluster requires reliable networking for node communication, inte
 
 **Network configuration:**
 - Subnet: 192.168.70.0/24
-- Gateway: 192.168.70.1 (Windows host via vmnetnat.exe)
+- Gateway: 192.168.70.2 (Windows host via vmnetnat.exe)
 - NAT provider: VMware's built-in NAT service
 - DHCP: Disabled (static IPs only)
 
