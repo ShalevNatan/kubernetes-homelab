@@ -193,7 +193,7 @@ Connect VMs directly to home network (192.168.1.x) via bridged adapter, using ro
 Network: VMnet8 (NAT)
 Subnet: 192.168.70.0
 Subnet mask: 255.255.255.0 (/24)
-Gateway: 192.168.70.1 (automatic, provided by VMware)
+Gateway: 192.168.70.1 (automatic, provided by VMware) <----- gateway is actually .2, important note at the bottom of this adr
 DHCP: Disabled (unchecked)
 NAT settings: Default (vmnetnat.exe handles translation)
 ```
@@ -218,8 +218,8 @@ NAT settings: Default (vmnetnat.exe handles translation)
 
 **IP allocation scheme:**
 ```
-.1          - Gateway (reserved by VMware)
-.2-.9       - Reserved for future infrastructure (DNS, NTP, etc.)
+.1          - Gateway (reserved by VMware)  <----- after I checked the gateway is actually .2
+.3-.9       - Reserved for future infrastructure (DNS, NTP, etc.)
 .10-.19     - Kubernetes control plane nodes
 .20-.99     - Kubernetes worker nodes
 .100-.199   - Reserved for future expansion
@@ -266,7 +266,7 @@ network:
         - 192.168.70.10/24
       routes:
         - to: default
-          via: 192.168.70.1
+          via: 192.168.70.1  <--- not true, after troubleshooting it should be .2
       nameservers:
         addresses:
           - 8.8.8.8
@@ -280,6 +280,18 @@ ping 192.168.70.1        # Gateway reachable
 ping 8.8.8.8             # Internet reachable
 curl google.com          # DNS + HTTP working
 ```
+**Important Note!**
+**Gateway IP Correction** (2026-01-02):
+During Stage 1 template creation, I discovered VMware NAT service architecture:
+- NAT gateway service operates on `.subnet.2` (192.168.70.2)
+- Host virtual adapter occupies `.subnet.1` (192.168.70.1)
+- Original ADR specified `.1` based on typical gateway conventions
+- **Corrected to `.2`** to align with VMware NAT implementation
+- No impact on cluster design; caught during template phase
+- so the ping to the gateway is actually 192.168.70.2
+- In the routes of netplan config, it should direct to .2 and not .1
+- I decided to leave all original addresses in this adr with pointing the correction from .1 to .2, I wanted the adr to be as sterile as possible.
+- small corrections made for .2 gateway, the .1 addresses are still here in the adr, others can learn from them
 
 **Timeline:** Implemented December 2025 (Stage 1)
 
