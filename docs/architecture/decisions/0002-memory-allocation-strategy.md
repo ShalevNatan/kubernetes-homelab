@@ -1,7 +1,7 @@
 # 2. Memory Allocation Strategy - 48GB Reserved for VMs
 
 **Date:** 2025-12-31  
-**Status:** Accepted  
+**Status:** ~~Accepted~~ After provisioning, Memory changed to 40GB, Info in later ADRs  
 **Deciders:** Shalev Natan  
 **Tags:** #infrastructure #memory #resource-planning #foundation
 
