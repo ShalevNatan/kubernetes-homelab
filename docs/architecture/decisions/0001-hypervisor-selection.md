@@ -9,24 +9,23 @@
 
 ## Context and Problem Statement
 
-The home lab requires a Type-2 hypervisor to run multiple Ubuntu Server VMs on a Windows 11 Pro host (HP ZBook Fury G8). The hypervisor must support a 3-node Kubernetes cluster while maintaining system stability and security posture.
+My home lab requires a Type-2 hypervisor to run multiple Ubuntu Server VMs on a Windows 11 Pro host (HP ZBook Fury G8). The hypervisor must support a 3-node Kubernetes cluster while maintaining system stability and security posture.
 
 **Background:**
 - Host OS: Windows 11 Pro with VBS (Virtualization-Based Security) enabled
 - Hardware: Intel i7-11th Gen, 64GB RAM, 2TB NVMe SSD
-- Constraints: TPM 2.0 and BitLocker encryption required for system integrity
+- Constraints: Windows security may affect performance, not critical for my homelab, I will accept a bit lower performance for enhanced security
 - Use case: Production-grade Kubernetes learning environment for 8-month DevOps preparation
 
 **Key constraint:** Cannot disable Hyper-V or VBS due to:
 - Security features (Credential Guard, Device Guard) enforced by Windows configuration
-- BitLocker encryption dependencies
 - Risk of system instability from removing core security components
 
 ---
 
 ## Decision Drivers
 
-- **Security posture:** Must maintain VBS/TPM/BitLocker (non-negotiable)
+- **Security posture:** Must maintain VBS/TPM (non-negotiable)
 - **Kubernetes compatibility:** Support for 3+ VMs with nested networking
 - **Performance:** Acceptable overhead for development/learning workloads
 - **Stability:** Reliable operation during long-running experiments
@@ -46,7 +45,7 @@ The home lab requires a Type-2 hypervisor to run multiple Ubuntu Server VMs on a
 
 ## Decision Outcome
 
-**Chosen option:** "VMware Workstation Pro in Windows Hypervisor Platform (WHP) mode"
+**Chosen option:** "VMware Workstation Pro in Windows Hypervisor Platform (WHP) mode."
 
 **Justification:**
 
@@ -152,7 +151,7 @@ While technically superior in performance, Hyper-V's operational friction during
 **What was done:**
 1. Installed VMware Workstation Pro 25H2
 2. Verified WHP mode auto-enabled (coexists with Hyper-V)
-3. Configured global memory reservation (48GB for VMs)
+3. Configured global memory reservation (48GB for VMs) 
 4. Set VM storage location (D:\VMs for dedicated NVMe space)
 
 **Timeline:** Implemented December 2025 (Stage 1)
