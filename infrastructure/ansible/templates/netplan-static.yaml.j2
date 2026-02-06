@@ -1,0 +1,16 @@
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    {{ cluster_network.interface }}:
+      dhcp4: no
+      addresses:
+        - {{ hostvars[inventory_hostname].planned_static_ip }}/24
+      routes:
+        - to: default
+          via: {{ cluster_network.gateway }}
+      nameservers:
+        addresses:
+{% for dns in cluster_network.dns_servers %}
+          - {{ dns }}
+{% endfor %}

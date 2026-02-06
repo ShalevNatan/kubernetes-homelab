@@ -1,0 +1,35 @@
+---
+- name: Configure hostnames and /etc/hosts
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Set hostname
+      hostname:
+        name: "{{ inventory_hostname }}"
+      
+    - name: Update /etc/hostname
+      copy:
+        content: "{{ inventory_hostname }}\n"
+        dest: /etc/hostname
+        owner: root
+        group: root
+        mode: '0644'
+      
+    - name: Configure /etc/hosts
+      template:
+        src: ../templates/hosts.j2
+        dest: /etc/hosts
+        owner: root
+        group: root
+        mode: '0644'
+      
+    - name: Verify hostname
+      command: hostname
+      register: current_hostname
+      changed_when: false
+      
+    - name: Display configured hostname
+      debug:
+        msg: "Hostname is now: {{ current_hostname.stdout }}"

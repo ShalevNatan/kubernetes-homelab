@@ -1,0 +1,59 @@
+---
+- name: Configure static IP addresses via Netplan
+  hosts: all
+  become: yes
+  gather_facts: yes
+  
+  tasks:
+    - name: Install network tools
+      apt:
+        name:
+          - net-tools
+          - iputils-ping
+        state: present
+        update_cache: yes
+      
+    - name: Backup existing Netplan configuration
+      shell: |
+        if [ -f /etc/netplan/*.yaml ]; then
+          cp /etc/netplan/*.yaml /etc/netplan/00-backup-$(date +%Y%m%d-%H%M%S).yaml.bak
+        fi
+      args:
+        creates: /etc/netplan/*.yaml.bak
+      
+    - name: Remove old Netplan configurations
+      shell: rm -f /etc/netplan/[0-9][0-9]-*.yaml
+      
+    - name: Create Netplan static IP configuration
+      template:
+        src: ../templates/netplan-static.yaml.j2
+        dest: /etc/netplan/01-netcfg.yaml
+        owner: root
+        group: root
+        mode: '0600'
+      
+    - name: Apply Netplan configuration
+      command: netplan apply
+      async: 45
+      poll: 0
+      
+    - name: Wait for network to stabilize
+      wait_for:
+        timeout: 10
+      delegate_to: localhost
+      become: no
+      
+    - name: Update Ansible inventory with new IPs
+      debug:
+        msg: "Node {{ inventory_hostname }} should now be at {{ hostvars[inventory_hostname].planned_static_ip }}"
+
+    - name: Update local inventory file with static IPs
+      delegate_to: localhost
+      become: no
+      run_once: yes
+      lineinfile:
+        path: /mnt/d/homelab/ansible/inventory/hosts.ini
+        regexp: '^{{ item }} ansible_host='
+        line: "{{ item }} ansible_host={{ hostvars[item].planned_static_ip }}"
+        backrefs: yes
+      loop: "{{ groups['all'] }}"

@@ -1,0 +1,20 @@
+---
+# Global variables for all hosts
+
+# Network configuration
+cluster_network:
+  subnet: "192.168.70.0/24"
+  gateway: "192.168.70.2"  # VMnet8 NAT gateway
+  dns_servers:
+    - "192.168.70.2"        # VMware NAT DNS
+    - "8.8.8.8"             # Google DNS fallback
+  interface: "ens32"       # VMware default interface
+
+# Cluster node mapping
+cluster_nodes:
+  - hostname: "k8s-master-01"
+    ip: "192.168.70.10"
+  - hostname: "k8s-worker-01"
+    ip: "192.168.70.11"
+  - hostname: "k8s-worker-02"
+    ip: "192.168.70.12"
