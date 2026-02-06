@@ -33,7 +33,7 @@ $ProgressPreference = "Continue"
 # Paths
 $vmrunPath = "C:\Program Files (x86)\VMware\VMware Workstation\vmrun.exe"
 $templateVMX = "D:\homelab\vms\templates\k8s-template\k8s-template.vmx"
-$snapshotName = "Clean Template - DHCP Bootstrap v2"
+$snapshotName = "Clean Template - DHCP Bootstrap v3"
 $clusterDir = "D:\homelab\vms\cluster"
 $inventoryPath = "D:\homelab\ansible\inventory\hosts.ini"
 
@@ -261,7 +261,7 @@ function New-AnsibleInventory {
     $inventoryLines += ""
     $inventoryLines += "[all:vars]"
     $inventoryLines += "ansible_user=k8s"
-    $inventoryLines += "ansible_ssh_private_key_file=~/.ssh/homelab_ed25519"
+    $inventoryLines += "ansible_ssh_private_key_file=~/.ssh/homelab_wsl"
     $inventoryLines += "ansible_python_interpreter=/usr/bin/python3"
     $inventoryLines += ""
     $inventoryLines += "# ============================================================================"
