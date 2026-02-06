@@ -97,12 +97,12 @@ kubernetes-homelab/
 - [x] VMware Workstation configuration
 - [x] Network architecture (VMnet8 NAT)
 - [x] Git repository structure
-- [ ] Ubuntu 24.04 LTS template VM
-- [ ] Initial ADRs (hypervisor, memory, networking)
+- [x] Ubuntu 24.04 LTS template VM
+- [x] Initial ADRs (hypervisor, memory, networking)
 
 **Stage 2: Infrastructure as Code** 🔜 Upcoming
-- [ ] Terraform VM provisioning
-- [ ] Ansible playbooks (OS hardening, container runtime)
+- [x] ~~Terraform VM provisioning~~ No stable Terraform provider found, Moved to PowerShell
+- [ ] Ansible playbooks (Static IPs, OS hardening, container runtime)
 - [ ] Automated node deployment
 
 **Stage 3: Kubernetes Bootstrap** 🔜 Planned
@@ -181,5 +181,5 @@ This project is personal educational work. Documentation and configurations are 
 
 ---
 
-**Last Updated:** December 2024  
+**Last Updated:** December 2025  
 **Current Stage:** 1 of 8 (Foundation)
