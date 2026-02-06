@@ -100,12 +100,12 @@ kubernetes-homelab/
 - [x] Ubuntu 24.04 LTS template VM
 - [x] Initial ADRs (hypervisor, memory, networking)
 
-**Stage 2: Infrastructure as Code** 🔜 Upcoming
+**Stage 2: Infrastructure as Code** 
 - [x] ~~Terraform VM provisioning~~ No stable Terraform provider found, Moved to PowerShell
-- [ ] Ansible playbooks (Static IPs, OS hardening, container runtime)
-- [ ] Automated node deployment
+- [x] Ansible playbooks (Static IPs, OS hardening, container runtime)
+- [x] Automated node deployment - from zero to ready to install 3 nodes of k8s
 
-**Stage 3: Kubernetes Bootstrap** 🔜 Planned
+**Stage 3: Kubernetes Bootstrap** 🔜 Upcoming
 - [ ] kubeadm cluster initialization
 - [ ] Control plane configuration
 - [ ] Worker node joining
