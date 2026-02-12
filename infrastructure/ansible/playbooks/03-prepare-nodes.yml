@@ -1,0 +1,137 @@
+---
+# Stage 3, Phase 1: Prepare all nodes for Kubernetes installation
+# Purpose: Configure kernel modules, sysctl settings, and system requirements
+# Duration: ~5 minutes execution time
+# Prerequisites: Stage 2 complete (static networking, hostnames configured)
+# Idempotent: Safe to re-run multiple times
+
+- name: Prepare all nodes for Kubernetes
+  hosts: all
+  become: true
+  vars:
+    # Kernel modules required for Kubernetes networking
+    required_modules:
+      - overlay      # containerd storage driver
+      - br_netfilter # iptables bridge traffic visibility
+    
+    # sysctl parameters for Kubernetes networking
+    sysctl_settings:
+      net.bridge.bridge-nf-call-iptables: 1   # Enable iptables for bridged traffic
+      net.bridge.bridge-nf-call-ip6tables: 1  # Enable ip6tables for bridged traffic
+      net.ipv4.ip_forward: 1                  # Enable IP forwarding (pod-to-pod routing)
+
+  tasks:
+    # ============================================================================
+    # TASK GROUP 1: Kernel Module Configuration
+    # Why: Kubernetes networking requires specific kernel capabilities
+    # ============================================================================
+
+    - name: Load kernel modules required by Kubernetes
+      community.general.modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ required_modules }}"
+      # What this does: Loads modules into running kernel
+      # Why overlay: containerd uses overlay2 storage driver for efficient layered images
+      # Why br_netfilter: Enables iptables to process traffic on virtual bridges (CNI requirement)
+
+    - name: Ensure kernel modules load on boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          # Kubernetes required kernel modules
+          # Managed by Ansible - DO NOT EDIT MANUALLY
+          overlay
+          br_netfilter
+        mode: '0644'
+      # What this does: Creates persistent configuration file
+      # Why: Modules loaded by modprobe are lost on reboot
+      # File location: /etc/modules-load.d/ is systemd standard location
+
+    - name: Verify kernel modules are loaded
+      ansible.builtin.shell: lsmod | grep -E '(overlay|br_netfilter)'
+      register: modules_check
+      changed_when: false
+      failed_when: modules_check.rc != 0
+      # What this does: Confirms modules are active in running kernel
+      # Why verify: Catch issues early before attempting Kubernetes install
+
+    # ============================================================================
+    # TASK GROUP 2: sysctl Network Configuration
+    # Why: Kubernetes networking requires specific kernel network settings
+    # ============================================================================
+
+    - name: Configure sysctl parameters for Kubernetes
+      ansible.posix.sysctl:
+        name: "{{ item.key }}"
+        value: "{{ item.value }}"
+        state: present
+        sysctl_file: /etc/sysctl.d/k8s.conf
+        reload: yes
+      loop: "{{ sysctl_settings | dict2items }}"
+      # What this does: Sets kernel parameters and makes them persistent
+      # Why net.bridge.bridge-nf-call-iptables=1:
+      #   - Enables iptables to see bridged traffic (required for kube-proxy)
+      #   - Without this: Service networking breaks (pods can't reach services)
+      # Why net.ipv4.ip_forward=1:
+      #   - Enables packet forwarding between network interfaces
+      #   - Without this: Pod-to-pod communication across nodes fails
+
+    - name: Verify sysctl settings are applied
+      ansible.builtin.shell: sysctl {{ item.key }}
+      loop: "{{ sysctl_settings | dict2items }}"
+      register: sysctl_check
+      changed_when: false
+      failed_when: item.value|string not in sysctl_check.stdout
+      # What this does: Confirms settings are active in running kernel
+      # Why verify: sysctl can silently fail if kernel module isn't loaded
+
+    # ============================================================================
+    # TASK GROUP 3: Swap Disable
+    # Why: kubelet fails to start if swap is enabled (design decision)
+    # Kubernetes assumption: Pods get dedicated memory (swap breaks resource guarantees)
+    # ============================================================================
+
+    - name: Disable swap immediately
+      ansible.builtin.command: swapoff -a
+      when: ansible_swaptotal_mb > 0
+      # What this does: Turns off swap in running system
+      # Why: kubelet preflight checks fail if swap is active
+      # Condition: Only run if swap is currently enabled (idempotency)
+
+    - name: Remove swap entries from /etc/fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '^\s*[^#].*\s+swap\s+'
+        state: absent
+      # What this does: Prevents swap from re-enabling on reboot
+      # Why: swapoff is temporary (lost on reboot)
+      # Regex explanation: Matches any non-comment line containing "swap"
+
+    - name: Verify swap is disabled
+      ansible.builtin.command: swapon --show
+      register: swap_check
+      changed_when: false
+      failed_when: swap_check.stdout != ""
+      # What this does: Confirms no swap devices are active
+      # Expected output: Empty (no swap active)
+      # Failure condition: Any output means swap is still enabled
+
+    # ============================================================================
+    # TASK GROUP 4: Final Validation
+    # Purpose: Comprehensive readiness check before Kubernetes installation
+    # ============================================================================
+
+    - name: Display preparation summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Node Preparation Complete"
+          - "============================================"
+          - "Kernel modules loaded: {{ required_modules | join(', ') }}"
+          - "Sysctl settings applied: {{ sysctl_settings.keys() | list | join(', ') }}"
+          - "Swap status: Disabled"
+          - "Node ready for container runtime installation"
+          - "============================================"
+      # What this does: Human-readable summary of changes
+      # Why: Confirms all prerequisites met before moving to Phase 2
