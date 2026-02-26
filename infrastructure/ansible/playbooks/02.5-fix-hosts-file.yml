@@ -1,0 +1,34 @@
+---
+# Fix /etc/hosts to remove 127.0.1.1 hostname conflicts
+# Required for Kubernetes: nodes must resolve their own hostname to cluster IP, not loopback
+# Issue: Ubuntu installer creates "127.0.1.1 <hostname>" by default, causing kubelet registration failures
+
+- name: Fix /etc/hosts for Kubernetes compatibility
+  hosts: all
+  become: true
+  tasks:
+    - name: Remove 127.0.1.1 hostname entry
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1\s+'
+        state: absent
+      register: hosts_fixed
+
+    - name: Verify hostname resolves to cluster IP (not loopback)
+      ansible.builtin.shell: |
+        set -e
+        hostname_ip=$(getent hosts $(hostname) | awk '{print $1}')
+        if echo "$hostname_ip" | grep -qE '^192\.168\.70\.'; then
+          echo "✅ $(hostname) → $hostname_ip"
+        else
+          echo "❌ $(hostname) → $hostname_ip (expected 192.168.70.x)"
+          exit 1
+        fi
+      args:
+        executable: /bin/bash
+      changed_when: false
+      register: verify_hostname
+
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg: "{{ verify_hostname.stdout }}"

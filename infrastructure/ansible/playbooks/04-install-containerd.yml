@@ -1,0 +1,89 @@
+---
+# Stage 3, Phase 2: Install and configure containerd (Robust/Idempotent Version)
+- name: Install and configure containerd on all nodes
+  hosts: all
+  become: true
+  vars:
+    containerd_version: "1.7.*"
+    docker_gpg_key_url: "https://download.docker.com/linux/ubuntu/gpg"
+    docker_apt_repo: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+
+  tasks:
+    - name: Create directory for APT keyrings
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download and dearmor Docker GPG key
+      ansible.builtin.shell: |
+        curl -fsSL {{ docker_gpg_key_url }} | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod 644 /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker repository to APT sources
+      ansible.builtin.apt_repository:
+        repo: "{{ docker_apt_repo }}"
+        state: present
+        filename: docker
+        update_cache: yes
+
+    - name: Install containerd.io package
+      ansible.builtin.apt:
+        name: "containerd.io={{ containerd_version }}"
+        state: present
+
+    - name: Hold containerd package
+      ansible.builtin.dpkg_selections:
+        name: containerd.io
+        selection: hold
+
+    - name: Ensure /etc/containerd exists
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+
+    # Check if the file is actually "healthy"
+    - name: Check if SystemdCgroup is configured correctly
+      ansible.builtin.command: grep -q "SystemdCgroup = true" /etc/containerd/config.toml
+      register: cgroup_check
+      failed_when: false
+      changed_when: false
+
+    # Only runs if the file is missing OR if the grep above failed
+    - name: Force regenerate containerd config if unhealthy
+      ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+      when: cgroup_check.rc != 0
+
+    - name: Configure SystemdCgroup driver
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      register: containerd_config_changed
+
+    - name: Ensure containerd is enabled and started
+      ansible.builtin.systemd:
+        name: containerd
+        enabled: yes
+        state: started
+
+    - name: Restart containerd if configuration was corrected
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted
+        daemon_reload: yes
+      when: containerd_config_changed is changed or cgroup_check.rc != 0
+
+    - name: Final Confirmation of Cgroup Driver
+      ansible.builtin.command: grep "SystemdCgroup = true" /etc/containerd/config.toml
+      changed_when: false
+      register: final_grep
+
+    - name: Success Summary
+      ansible.builtin.debug:
+        msg: 
+          - "Containerd status: Operational"
+          - "Cgroup Driver verify: {{ final_grep.stdout }}"
