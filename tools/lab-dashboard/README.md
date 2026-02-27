@@ -1,6 +1,7 @@
 # Lab Control Dashboard
 
 A local web-based operational control plane for the kubernetes-homelab.
+<img width="2558" height="1258" alt="image" src="https://github.com/user-attachments/assets/d1637c66-d696-476f-a0ab-56ed3edc8f83" />
 
 See [ADR-0011](../../docs/architecture/decisions/0011-lab-control-dashboard.md) for the architectural rationale.
 
