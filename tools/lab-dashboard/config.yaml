@@ -1,0 +1,61 @@
+# Lab Control Dashboard — Configuration
+#
+# This is the single authoritative file for all paths and environment settings.
+# Edit this file if your repo moves, VMware is reinstalled, or WSL distro changes.
+#
+# IMPORTANT: Use double backslashes on Windows paths (YAML string escaping).
+
+# ---------------------------------------------------------------------------
+# VMware
+# ---------------------------------------------------------------------------
+vmware:
+  vmrun_path: "C:\\Program Files (x86)\\VMware\\VMware Workstation\\vmrun.exe"
+
+  # Where the template VMX lives
+  template_vmx: "D:\\homelab\\vms\\templates\\k8s-template\\k8s-template.vmx"
+
+  # The snapshot name to clone from — must match exactly
+  snapshot_name: "Clean Template - v3"
+
+  # Where cloned VM directories are created
+  cluster_dir: "D:\\homelab\\vms\\cluster"
+
+# ---------------------------------------------------------------------------
+# Ansible / WSL2
+# ---------------------------------------------------------------------------
+ansible:
+  # WSL2 distro name — run 'wsl --list' to confirm
+  wsl_distro: "Ubuntu"
+
+  # Path to the ansible directory inside the repo, as seen from Windows
+  ansible_dir: "D:\\kubernetes-homelab\\infrastructure\\ansible"
+
+  # Path to the ansible directory as seen from inside WSL2
+  # Adjust if your repo is on a different drive (e.g., E: → /mnt/e/...)
+  ansible_dir_wsl: "/mnt/d/kubernetes-homelab/infrastructure/ansible"
+
+  # Ansible inventory file path (on Windows — in the runtime data dir, not the repo)
+  # This is where provision-vms.ps1 writes the generated inventory
+  inventory_path: "D:\\homelab\\ansible\\inventory\\hosts.ini"
+
+# ---------------------------------------------------------------------------
+# PowerShell scripts
+# ---------------------------------------------------------------------------
+powershell:
+  scripts_dir: "D:\\kubernetes-homelab\\infrastructure\\powershell"
+  provision_script: "provision-vms.ps1"
+  deprovision_script: "deprovision-vms.ps1"
+
+# ---------------------------------------------------------------------------
+# VM configuration file
+# ---------------------------------------------------------------------------
+vm_config:
+  # Path to vm-config.yaml — consumed by provision-vms.ps1 via -ConfigFile
+  path: "D:\\kubernetes-homelab\\tools\\lab-dashboard\\vm-config.yaml"
+
+# ---------------------------------------------------------------------------
+# Dashboard server
+# ---------------------------------------------------------------------------
+server:
+  host: "127.0.0.1"
+  port: 8000

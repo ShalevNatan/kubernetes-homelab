@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab Control Dashboard</title>
+
+  <!-- Alpine.js — lightweight reactive state -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
+
+  <style>
+    /* -----------------------------------------------------------------------
+       Base
+    ----------------------------------------------------------------------- */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f1117;
+      --surface:   #1a1d27;
+      --border:    #2a2d3e;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --accent:    #6366f1;
+      --green:     #22c55e;
+      --yellow:    #eab308;
+      --red:       #ef4444;
+      --log-bg:    #090b10;
+      --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    /* -----------------------------------------------------------------------
+       Layout
+    ----------------------------------------------------------------------- */
+    .shell {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    header h1 {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .status-pill {
+      font-size: 12px;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-weight: 500;
+    }
+    .status-pill.idle  { background: #1e3a2e; color: var(--green); border: 1px solid #2d5a3d; }
+    .status-pill.busy  { background: #3a2a1e; color: var(--yellow); border: 1px solid #5a3d1e; }
+
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 16px;
+      padding: 16px;
+      align-items: start;
+    }
+
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 8px 24px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    /* -----------------------------------------------------------------------
+       Cards
+    ----------------------------------------------------------------------- */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .card-body {
+      padding: 16px;
+    }
+
+    /* -----------------------------------------------------------------------
+       VM Status Panel
+    ----------------------------------------------------------------------- */
+    .vm-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 10px;
+    }
+
+    .vm-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+    }
+
+    .vm-name {
+      font-weight: 600;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+
+    .vm-meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .vm-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      margin-bottom: 10px;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .state-running    .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .state-stopped    .dot { background: var(--yellow); }
+    .state-not_provisioned .dot { background: var(--muted); }
+
+    .state-running    { color: var(--green); }
+    .state-stopped    { color: var(--yellow); }
+    .state-not_provisioned { color: var(--muted); }
+
+    .vm-controls {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+
+    /* -----------------------------------------------------------------------
+       Buttons
+    ----------------------------------------------------------------------- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 5px 12px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: opacity 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .btn-primary  { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-success  { background: #166534; color: var(--green); border-color: #166534; }
+    .btn-danger   { background: #7f1d1d; color: var(--red); border-color: #7f1d1d; }
+    .btn-warning  { background: #78350f; color: var(--yellow); border-color: #78350f; }
+    .btn-ghost    { background: transparent; color: var(--muted); border-color: var(--border); }
+    .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--text); }
+    .btn-sm       { padding: 3px 8px; font-size: 11px; }
+
+    /* -----------------------------------------------------------------------
+       Provision Panel
+    ----------------------------------------------------------------------- */
+    .provision-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* -----------------------------------------------------------------------
+       Playbook Runner
+    ----------------------------------------------------------------------- */
+    .playbook-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .playbook-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+    }
+
+    .playbook-label {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+
+    .result-badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+
+    .result-success { background: #1a3a24; color: var(--green); }
+    .result-failed  { background: #3a1a1a; color: var(--red); }
+    .result-never   { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+
+    /* -----------------------------------------------------------------------
+       Pipeline View (spans full width at bottom)
+    ----------------------------------------------------------------------- */
+    .pipeline {
+      grid-column: 1 / -1;
+    }
+
+    .pipeline-stages {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .pipeline-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex: 1;
+      min-width: 100px;
+      position: relative;
+    }
+
+    /* Connector line between stages */
+    .pipeline-stage:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 14px;
+      left: calc(50% + 14px);
+      right: calc(-50% + 14px);
+      height: 2px;
+      background: var(--border);
+      z-index: 0;
+    }
+
+    .pipeline-stage.done:not(:last-child)::after { background: var(--green); }
+
+    .stage-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 700;
+      z-index: 1;
+      position: relative;
+      color: var(--muted);
+    }
+
+    .pipeline-stage.done .stage-circle {
+      border-color: var(--green);
+      color: var(--green);
+      background: #0a2010;
+    }
+
+    .pipeline-stage.failed .stage-circle {
+      border-color: var(--red);
+      color: var(--red);
+      background: #200a0a;
+    }
+
+    .stage-label {
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      margin-top: 6px;
+      max-width: 90px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pipeline-stage.done .stage-label { color: var(--text); }
+
+    /* -----------------------------------------------------------------------
+       Config Editor
+    ----------------------------------------------------------------------- */
+    .config-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .config-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      padding: 0 8px 8px;
+    }
+
+    .config-table td {
+      padding: 5px 8px;
+      vertical-align: middle;
+    }
+
+    .config-table tr + tr td {
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+    }
+
+    .config-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      width: 100%;
+      font-family: var(--font-mono);
+    }
+
+    .config-input:focus {
+      outline: 1px solid var(--accent);
+      border-color: var(--accent);
+    }
+
+    /* -----------------------------------------------------------------------
+       Log Console
+    ----------------------------------------------------------------------- */
+    .log-console {
+      grid-column: 1 / -1;
+    }
+
+    .log-output {
+      background: var(--log-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.6;
+      height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .log-line { display: block; }
+    .log-line.info    { color: #94a3b8; }
+    .log-line.success { color: var(--green); }
+    .log-line.warning { color: var(--yellow); }
+    .log-line.error   { color: var(--red); }
+    .log-line.start   { color: var(--accent); font-weight: 600; }
+    .log-line.cmd     { color: #6b7280; font-style: italic; }
+    .log-line.exit    { color: var(--text); font-weight: 600; border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+
+    /* -----------------------------------------------------------------------
+       Misc utilities
+    ----------------------------------------------------------------------- */
+    .flex-row { display: flex; align-items: center; gap: 8px; }
+    .spacer   { flex: 1; }
+    .text-muted { color: var(--muted); font-size: 12px; }
+    .mt-8 { margin-top: 8px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-master { background: #1e3a5a; color: #93c5fd; }
+    .badge-worker { background: #1e3a2e; color: #86efac; }
+
+    .confirm-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .confirm-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      max-width: 400px;
+      width: 90%;
+    }
+
+    .confirm-box h3 { font-size: 15px; margin-bottom: 8px; color: var(--red); }
+    .confirm-box p  { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+    .confirm-box .actions { display: flex; gap: 10px; justify-content: flex-end; }
+  </style>
+</head>
+<body>
+
+<div class="shell" x-data="dashboard()" x-init="init()">
+
+  <!-- Header -->
+  <header>
+    <h1>Lab Control Dashboard</h1>
+    <div class="flex-row">
+      <span class="text-muted" x-text="'kubernetes-homelab'"></span>
+      <span class="status-pill" :class="busy ? 'busy' : 'idle'"
+            x-text="busy ? ('Running: ' + currentOp) : 'Idle'"></span>
+      <button class="btn btn-ghost btn-sm" @click="refreshVMs()">↻ Refresh</button>
+    </div>
+  </header>
+
+  <!-- Main content -->
+  <main>
+
+    <!-- ===================================================================
+         VM Status Panel
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">VM Status</span>
+        <span class="text-muted" x-text="vms.length + ' nodes'"></span>
+      </div>
+      <div class="card-body">
+        <template x-if="vms.length === 0">
+          <p class="text-muted">Loading…</p>
+        </template>
+        <div class="vm-grid">
+          <template x-for="vm in vms" :key="vm.name">
+            <div class="vm-card">
+              <div class="vm-name" x-text="vm.name"></div>
+              <div class="vm-meta flex-row">
+                <span class="badge" :class="'badge-' + vm.role" x-text="vm.role"></span>
+                <span x-text="vm.planned_ip"></span>
+              </div>
+              <div class="vm-state" :class="'state-' + vm.state">
+                <span class="dot"></span>
+                <span x-text="vm.state.replace('_', ' ')"></span>
+              </div>
+              <div class="vm-controls">
+                <button class="btn btn-success btn-sm"
+                        :disabled="busy || vm.state === 'running' || vm.state === 'not_provisioned'"
+                        @click="vmAction(vm.name, 'start')">Start</button>
+                <button class="btn btn-warning btn-sm"
+                        :disabled="busy || vm.state !== 'running'"
+                        @click="vmAction(vm.name, 'stop')">Stop</button>
+                <button class="btn btn-ghost btn-sm"
+                        :disabled="busy || vm.state !== 'running'"
+                        @click="vmAction(vm.name, 'restart')">Restart</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Provision / Deprovision Panel
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Lifecycle</span>
+      </div>
+      <div class="card-body">
+        <p class="text-muted" style="margin-bottom:14px;">
+          Provision clones VMs from the template snapshot using specs from
+          vm-config.yaml. Deprovision destroys all cluster VMs — irreversible.
+        </p>
+        <div class="provision-actions">
+          <button class="btn btn-primary"
+                  :disabled="busy"
+                  @click="startProvision()">
+            ▶ Provision
+          </button>
+          <button class="btn btn-danger"
+                  :disabled="busy"
+                  @click="showDeprovisionConfirm = true">
+            ✕ Deprovision
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Playbook Runner
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Ansible Playbooks</span>
+        <button class="btn btn-ghost btn-sm" @click="loadPlaybooks()">↻</button>
+      </div>
+      <div class="card-body">
+        <template x-if="playbooks.length === 0">
+          <p class="text-muted">No playbooks found.</p>
+        </template>
+        <div class="playbook-list">
+          <template x-for="pb in playbooks" :key="pb.name">
+            <div class="playbook-row">
+              <span class="playbook-label" x-text="pb.label"></span>
+              <span class="result-badge" :class="'result-' + pb.last_result"
+                    x-text="pb.last_result"></span>
+              <button class="btn btn-primary btn-sm"
+                      :disabled="busy"
+                      @click="runPlaybook(pb.name)">Run</button>
+            </div>
+          </template>
+        </div>
+        <div class="mt-8 flex-row">
+          <button class="btn btn-ghost btn-sm"
+                  :disabled="busy || playbooks.length === 0"
+                  @click="runAllPlaybooks()">Run All in Order</button>
+          <span class="text-muted" x-show="playbookQueue.length > 0"
+                x-text="'Queue: ' + playbookQueue.length + ' remaining'"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Config Editor
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">VM Config</span>
+        <span class="text-muted">vm-config.yaml</span>
+      </div>
+      <div class="card-body">
+        <template x-if="vmConfig.length === 0">
+          <p class="text-muted">Loading config…</p>
+        </template>
+        <template x-if="vmConfig.length > 0">
+          <div>
+            <table class="config-table">
+              <thead>
+                <tr>
+                  <th>VM</th>
+                  <th>CPU</th>
+                  <th>RAM (MB)</th>
+                  <th>Planned IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(vm, idx) in vmConfig" :key="vm.name">
+                  <tr>
+                    <td>
+                      <div class="vm-name" x-text="vm.name"></div>
+                      <span class="badge" :class="'badge-' + vm.role" x-text="vm.role"></span>
+                    </td>
+                    <td>
+                      <input type="number" class="config-input" x-model.number="vmConfig[idx].cpu"
+                             min="1" max="32" style="width:60px;" />
+                    </td>
+                    <td>
+                      <input type="number" class="config-input" x-model.number="vmConfig[idx].ram_mb"
+                             min="1024" step="1024" style="width:80px;" />
+                    </td>
+                    <td>
+                      <input type="text" class="config-input" x-model="vmConfig[idx].planned_ip"
+                             style="width:130px;" />
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+            <div class="mt-8 flex-row">
+              <button class="btn btn-primary btn-sm" @click="saveVMConfig()">Save Config</button>
+              <span class="text-muted" x-text="configSaveMsg" x-show="configSaveMsg"></span>
+            </div>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Pipeline View (full width)
+    =================================================================== -->
+    <div class="card pipeline">
+      <div class="card-header">
+        <span class="card-title">Playbook Pipeline</span>
+        <span class="text-muted">execution history</span>
+      </div>
+      <div class="card-body">
+        <div class="pipeline-stages">
+          <template x-for="(pb, idx) in playbooks" :key="pb.name">
+            <div class="pipeline-stage"
+                 :class="pb.last_result === 'success' ? 'done' : (pb.last_result === 'failed' ? 'failed' : '')">
+              <div class="stage-circle" x-text="idx + 1"></div>
+              <div class="stage-label" :title="pb.label" x-text="pb.label.replace(/^\d+-/, '')"></div>
+            </div>
+          </template>
+        </div>
+        <template x-if="playbooks.length === 0">
+          <p class="text-muted">No playbooks found.</p>
+        </template>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Log Console (full width)
+    =================================================================== -->
+    <div class="card log-console">
+      <div class="card-header">
+        <span class="card-title">Log Output</span>
+        <div class="flex-row">
+          <span class="text-muted" x-text="logLines.length + ' lines'"></span>
+          <button class="btn btn-ghost btn-sm" @click="clearLog()">Clear</button>
+        </div>
+      </div>
+      <div class="card-body" style="padding:0;">
+        <div class="log-output" id="log-output" x-ref="logOutput">
+          <template x-for="(line, idx) in logLines" :key="idx">
+            <span class="log-line" :class="classifyLine(line)" x-text="line + '\n'"></span>
+          </template>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <footer>
+    <span>Lab Control Dashboard · kubernetes-homelab · FastAPI + Alpine.js</span>
+  </footer>
+
+  <!-- =====================================================================
+       Deprovision confirmation overlay
+  ===================================================================== -->
+  <div class="confirm-overlay" x-show="showDeprovisionConfirm" x-cloak
+       @keydown.escape.window="showDeprovisionConfirm = false">
+    <div class="confirm-box">
+      <h3>Destroy all cluster VMs?</h3>
+      <p>
+        This will stop and permanently delete k8s-master-01, k8s-worker-01,
+        and k8s-worker-02. The VM directories will be removed from disk.
+        This cannot be undone.
+      </p>
+      <div class="actions">
+        <button class="btn btn-ghost" @click="showDeprovisionConfirm = false">Cancel</button>
+        <button class="btn btn-danger" @click="confirmDeprovision()">Yes, Destroy</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+function dashboard() {
+  return {
+    // -----------------------------------------------------------------------
+    // State
+    // -----------------------------------------------------------------------
+    vms: [],
+    playbooks: [],
+    vmConfig: [],
+    logLines: [],
+    busy: false,
+    currentOp: '',
+    showDeprovisionConfirm: false,
+    configSaveMsg: '',
+    playbookQueue: [],
+    _activeWS: null,
+    _pollTimer: null,
+
+    // -----------------------------------------------------------------------
+    // Lifecycle
+    // -----------------------------------------------------------------------
+    async init() {
+      await this.refreshVMs();
+      await this.loadPlaybooks();
+      await this.loadVMConfig();
+      // Poll VM status every 10 seconds
+      this._pollTimer = setInterval(() => this.refreshVMs(), 10_000);
+    },
+
+    // -----------------------------------------------------------------------
+    // VM status
+    // -----------------------------------------------------------------------
+    async refreshVMs() {
+      try {
+        const res = await fetch('/api/vms');
+        const data = await res.json();
+        this.vms = data.vms;
+        this.busy = data.busy;
+        this.currentOp = data.current_operation || '';
+      } catch (e) {
+        this.appendLog('[ERROR] Could not reach dashboard backend: ' + e.message);
+      }
+    },
+
+    async vmAction(name, action) {
+      this.appendLog(`[INFO] ${action} ${name}…`);
+      try {
+        const res = await fetch(`/api/vms/${name}/${action}`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          this.appendLog(`[ERROR] ${data.detail}`);
+        } else {
+          this.appendLog(`[SUCCESS] ${name}: ${action} OK`);
+          await this.refreshVMs();
+        }
+      } catch (e) {
+        this.appendLog('[ERROR] ' + e.message);
+      }
+    },
+
+    // -----------------------------------------------------------------------
+    // WebSocket-driven execution
+    // -----------------------------------------------------------------------
+    openWS(path, onDone) {
+      if (this._activeWS) {
+        this.appendLog('[WARN] Closing existing connection before opening new one');
+        this._activeWS.close();
+      }
+
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${proto}//${location.host}${path}`;
+      const ws = new WebSocket(url);
+      this._activeWS = ws;
+
+      ws.onmessage = (ev) => {
+        this.appendLog(ev.data);
+      };
+
+      ws.onclose = () => {
+        this._activeWS = null;
+        this.refreshVMs();
+        this.loadPlaybooks();
+        if (onDone) onDone();
+      };
+
+      ws.onerror = (ev) => {
+        this.appendLog('[ERROR] WebSocket error — see browser console');
+        console.error('WebSocket error', ev);
+      };
+    },
+
+    startProvision() {
+      this.clearLog();
+      this.openWS('/api/ws/provision', null);
+    },
+
+    confirmDeprovision() {
+      this.showDeprovisionConfirm = false;
+      this.clearLog();
+      this.openWS('/api/ws/deprovision', null);
+    },
+
+    runPlaybook(name) {
+      this.clearLog();
+      this.openWS(`/api/playbooks/ws/run/${encodeURIComponent(name)}`, () => {
+        this.loadPlaybooks();   // refresh result badges
+        // If there's a queue, run next
+        if (this.playbookQueue.length > 0) {
+          const next = this.playbookQueue.shift();
+          setTimeout(() => this.runPlaybook(next), 500);
+        }
+      });
+    },
+
+    runAllPlaybooks() {
+      if (this.playbooks.length === 0) return;
+      this.playbookQueue = this.playbooks.map(pb => pb.name).slice(1);
+      this.runPlaybook(this.playbooks[0].name);
+    },
+
+    // -----------------------------------------------------------------------
+    // Playbooks
+    // -----------------------------------------------------------------------
+    async loadPlaybooks() {
+      try {
+        const res = await fetch('/api/playbooks');
+        const data = await res.json();
+        this.playbooks = data.playbooks;
+      } catch (e) {
+        this.appendLog('[ERROR] Failed to load playbooks: ' + e.message);
+      }
+    },
+
+    // -----------------------------------------------------------------------
+    // VM Config
+    // -----------------------------------------------------------------------
+    async loadVMConfig() {
+      try {
+        const res = await fetch('/api/vm-config');
+        const data = await res.json();
+        this.vmConfig = data.vms;
+      } catch (e) {
+        this.appendLog('[ERROR] Failed to load VM config: ' + e.message);
+      }
+    },
+
+    async saveVMConfig() {
+      try {
+        const res = await fetch('/api/vm-config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ vms: this.vmConfig }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          this.configSaveMsg = '✗ ' + (data.detail || 'Save failed');
+        } else {
+          this.configSaveMsg = '✓ Saved';
+          setTimeout(() => this.configSaveMsg = '', 3000);
+        }
+      } catch (e) {
+        this.configSaveMsg = '✗ ' + e.message;
+      }
+    },
+
+    // -----------------------------------------------------------------------
+    // Log console
+    // -----------------------------------------------------------------------
+    appendLog(line) {
+      this.logLines.push(line);
+      // Auto-scroll to bottom
+      this.$nextTick(() => {
+        const el = this.$refs.logOutput;
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    },
+
+    clearLog() {
+      this.logLines = [];
+    },
+
+    classifyLine(line) {
+      if (line.startsWith('[START]')) return 'start';
+      if (line.startsWith('[CMD]'))   return 'cmd';
+      if (line.startsWith('[EXIT]'))  return 'exit';
+      if (line.startsWith('[ERROR]')) return 'error';
+      if (line.startsWith('[BUSY]'))  return 'warning';
+      if (line.includes('[SUCCESS]') || line.includes('ok=') || line.includes('changed=')) return 'success';
+      if (line.includes('[ERROR]') || line.includes('FAILED') || line.includes('fatal:')) return 'error';
+      if (line.includes('[WARNING]') || line.includes('WARN')) return 'warning';
+      return 'info';
+    },
+  };
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,28 @@
+# VM Configuration — consumed by provision-vms.ps1 via -ConfigFile
+#
+# Edit this file through the Config Editor in the dashboard, or directly.
+# The provision script reads this file when called with -ConfigFile <path>.
+# If the script is run without -ConfigFile, it falls back to its own defaults.
+#
+# ram_mb: memory in megabytes (16384 = 16GB, 12288 = 12GB)
+# planned_ip: the static IP that Ansible will configure (Stage 2.3)
+# role: "master" or "worker" — controls Ansible group assignment in inventory
+
+vms:
+  - name: k8s-master-01
+    cpu: 4
+    ram_mb: 16384
+    planned_ip: "192.168.70.10"
+    role: master
+
+  - name: k8s-worker-01
+    cpu: 4
+    ram_mb: 12288
+    planned_ip: "192.168.70.11"
+    role: worker
+
+  - name: k8s-worker-02
+    cpu: 4
+    ram_mb: 12288
+    planned_ip: "192.168.70.12"
+    role: worker

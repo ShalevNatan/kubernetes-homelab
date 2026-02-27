@@ -8,7 +8,13 @@
     - Configures hardware specifications (CPU, RAM)
     - Powers on VMs and waits for network initialization
     - Generates Ansible inventory with DHCP IPs
-    
+
+.PARAMETER ConfigFile
+    Optional path to a JSON config file specifying VM specs (name, cpu, ram_mb,
+    planned_ip, role). When provided, overrides the hardcoded $vms defaults below.
+    The lab-dashboard generates this file from vm-config.yaml at provision time.
+    Run without -ConfigFile to use the hardcoded defaults (standalone operation).
+
 .NOTES
     Author: Shalev (DevOps Homelab Project)
     Date: 2026-01-10
@@ -20,7 +26,8 @@
 [CmdletBinding()]
 param(
     [switch]$WhatIf,
-    [switch]$Force
+    [switch]$Force,
+    [string]$ConfigFile = ""   # Optional: path to vm-config.json from the lab-dashboard
 )
 
 # ================================================================================
@@ -37,7 +44,8 @@ $snapshotName = "Clean Template - v3"
 $clusterDir = "D:\homelab\vms\cluster"
 $inventoryPath = "D:\homelab\ansible\inventory\hosts.ini"
 
-# VM Specifications
+# VM Specifications — defaults used when -ConfigFile is not provided.
+# These values match vm-config.yaml in tools/lab-dashboard/.
 $vms = @(
     @{
         Name = "k8s-master-01"
@@ -310,7 +318,35 @@ try {
     if ($WhatIf) {
         Write-Log "Running in WHATIF mode - no changes will be made" "WARNING"
     }
-    
+
+    # -------------------------------------------------------------------------
+    # Config file override
+    # If -ConfigFile is provided, load VM specs from the JSON file written by
+    # the lab-dashboard. PowerShell parses JSON natively — no modules required.
+    # JSON schema: { "vms": [ { name, cpu, ram_mb, planned_ip, role }, ... ] }
+    # -------------------------------------------------------------------------
+    if ($ConfigFile -ne "") {
+        if (-not (Test-Path $ConfigFile)) {
+            throw "ConfigFile not found: $ConfigFile"
+        }
+
+        Write-Log "Loading VM specs from config file: $ConfigFile" "INFO"
+        $configData = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+
+        # Remap snake_case JSON keys to the hashtable keys used throughout the script
+        $vms = $configData.vms | ForEach-Object {
+            @{
+                Name      = $_.name
+                CPU       = [int]$_.cpu
+                RAM       = [int]$_.ram_mb
+                PlannedIP = $_.planned_ip
+                Role      = $_.role
+            }
+        }
+
+        Write-Log "Loaded $($vms.Count) VMs from config file" "SUCCESS"
+    }
+
     Test-Prerequisites
     
     Write-Log "" "INFO"
