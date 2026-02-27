@@ -1,0 +1,11 @@
+---
+# 00-ping-nodes.yml
+# Purpose: Verify all cluster nodes are reachable via Ansible before running any other playbooks.
+# Run this after VMs are started to confirm SSH connectivity and inventory is correct.
+- name: Ping all cluster nodes
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: Ping node
+      ansible.builtin.ping:
