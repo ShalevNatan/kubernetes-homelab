@@ -119,14 +119,14 @@ function Stop-ClusterVM {
         $stopResult = & $vmrunPath stop $VMXPath soft 2>&1
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Log "  ✓ VM stopped gracefully" "SUCCESS"
+            Write-Log "  [OK] VM stopped gracefully" "SUCCESS"
         } else {
             # Graceful failed, force shutdown
             Write-Log "  Graceful shutdown failed, forcing..." "WARNING"
             $killResult = & $vmrunPath stop $VMXPath hard 2>&1
             
             if ($LASTEXITCODE -eq 0) {
-                Write-Log "  ✓ VM stopped (forced)" "SUCCESS"
+                Write-Log "  [OK] VM stopped (forced)" "SUCCESS"
             } else {
                 Write-Log "  Failed to stop VM: $killResult" "ERROR"
                 throw "Could not stop $VMName"
@@ -163,7 +163,7 @@ function Remove-ClusterVM {
     if ($PSCmdlet.ShouldProcess($vmDir, "Remove VM directory")) {
         try {
             Remove-Item -Path $vmDir -Recurse -Force -ErrorAction Stop
-            Write-Log "  ✓ VM directory removed: $vmDir" "SUCCESS"
+            Write-Log "  [OK] VM directory removed: $vmDir" "SUCCESS"
         } catch {
             Write-Log "  Error removing directory: $_" "ERROR"
             throw
@@ -181,7 +181,7 @@ function Remove-AnsibleInventory {
     
     if ($PSCmdlet.ShouldProcess($inventoryPath, "Remove inventory file")) {
         Remove-Item -Path $inventoryPath -Force
-        Write-Log "  ✓ Inventory file removed" "SUCCESS"
+        Write-Log "  [OK] Inventory file removed" "SUCCESS"
     }
 }
 
@@ -251,7 +251,7 @@ try {
         Write-Log "WARNING: Some VM directories still exist:" "WARNING"
         $remainingVMs | ForEach-Object { Write-Log "  - $($_.FullName)" "WARNING" }
     } else {
-        Write-Log "  ✓ All VM directories removed" "SUCCESS"
+        Write-Log "  [OK] All VM directories removed" "SUCCESS"
     }
     
     # Check for any running VMs that should have been stopped
@@ -265,7 +265,7 @@ try {
         Write-Log "WARNING: Some VMs are still running:" "WARNING"
         $clusterVMsRunning | ForEach-Object { Write-Log "  - $_" "WARNING" }
     } else {
-        Write-Log "  ✓ No cluster VMs running" "SUCCESS"
+        Write-Log "  [OK] No cluster VMs running" "SUCCESS"
     }
     
     # Summary
