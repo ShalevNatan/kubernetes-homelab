@@ -66,6 +66,16 @@ def _record_result(playbook_name: str, result: PlaybookResult) -> None:
     _save_state(state)
 
 
+def reset_run_state() -> None:
+    """Clear all playbook run history.
+
+    Called after provision or deprovision completes successfully — freshly
+    provisioned (or just-deleted) VMs have no Ansible configuration applied,
+    so stale pipeline history must not be shown.
+    """
+    _save_state({})
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
