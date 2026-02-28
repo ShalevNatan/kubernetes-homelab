@@ -12,7 +12,9 @@ alongside the dashboard. This drives the pipeline view.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,6 +23,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from backend import config, executor
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
 
@@ -173,8 +177,14 @@ async def ws_run_playbook(websocket: WebSocket, playbook_name: str) -> None:
 
     except WebSocketDisconnect:
         pass
-    except Exception as exc:
-        await websocket.send_text(f"[ERROR] {exc}")
+    except Exception:
+        tb = traceback.format_exc()
+        _log.error("ws_run_playbook raised:\n%s", tb)
+        last_tb_line = tb.strip().splitlines()[-1]
+        try:
+            await websocket.send_text(f"[ERROR] {last_tb_line}")
+        except Exception:
+            pass
     finally:
         # Determine result from the sentinel line emitted by stream_subprocess
         if last_line.startswith("[EXIT] Process finished successfully"):

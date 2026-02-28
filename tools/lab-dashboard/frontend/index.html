@@ -695,6 +695,13 @@
 
 <script>
 function dashboard() {
+  // WebSocket handle and poll timer are kept outside Alpine's reactive proxy.
+  // Storing native browser objects (WebSocket) or timer IDs in reactive state
+  // causes Alpine.js / @vue/reactivity to attempt deep observation of them,
+  // which interferes with their native behaviour and causes premature disconnects.
+  let _activeWS = null;
+  let _pollTimer = null;
+
   return {
     // -----------------------------------------------------------------------
     // State
@@ -708,8 +715,6 @@ function dashboard() {
     showDeprovisionConfirm: false,
     configSaveMsg: '',
     playbookQueue: [],
-    _activeWS: null,
-    _pollTimer: null,
 
     // -----------------------------------------------------------------------
     // Lifecycle
@@ -719,7 +724,7 @@ function dashboard() {
       await this.loadPlaybooks();
       await this.loadVMConfig();
       // Poll VM status every 10 seconds
-      this._pollTimer = setInterval(() => this.refreshVMs(), 10_000);
+      _pollTimer = setInterval(() => this.refreshVMs(), 10_000);
     },
 
     // -----------------------------------------------------------------------
@@ -756,23 +761,33 @@ function dashboard() {
     // -----------------------------------------------------------------------
     // WebSocket-driven execution
     // -----------------------------------------------------------------------
-    openWS(path, onDone) {
-      if (this._activeWS) {
+    openWS(path, opName, onDone) {
+      if (_activeWS) {
         this.appendLog('[WARN] Closing existing connection before opening new one');
-        this._activeWS.close();
+        _activeWS.close();
       }
 
       const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
       const url = `${proto}//${location.host}${path}`;
       const ws = new WebSocket(url);
-      this._activeWS = ws;
+
+      // Store in closure variable (not reactive state) to prevent Alpine.js
+      // from wrapping the WebSocket in a reactive Proxy.
+      _activeWS = ws;
+
+      // Mark busy immediately — don't wait for the poll timer to reflect it.
+      this.busy = true;
+      this.currentOp = opName;
 
       ws.onmessage = (ev) => {
         this.appendLog(ev.data);
       };
 
       ws.onclose = () => {
-        this._activeWS = null;
+        _activeWS = null;
+        // Reset busy state immediately; refreshVMs() will sync from server.
+        this.busy = false;
+        this.currentOp = '';
         this.refreshVMs();
         this.loadPlaybooks();
         if (onDone) onDone();
@@ -786,20 +801,19 @@ function dashboard() {
 
     startProvision() {
       this.clearLog();
-      this.openWS('/api/ws/provision', null);
+      this.openWS('/api/ws/provision', 'Provision', null);
     },
 
     confirmDeprovision() {
       this.showDeprovisionConfirm = false;
       this.clearLog();
-      this.openWS('/api/ws/deprovision', null);
+      this.openWS('/api/ws/deprovision', 'Deprovision', null);
     },
 
     runPlaybook(name) {
       this.clearLog();
-      this.openWS(`/api/playbooks/ws/run/${encodeURIComponent(name)}`, () => {
-        this.loadPlaybooks();   // refresh result badges
-        // If there's a queue, run next
+      this.openWS(`/api/playbooks/ws/run/${encodeURIComponent(name)}`, `Ansible: ${name}`, () => {
+        // loadPlaybooks() is already called in onclose — just advance the queue.
         if (this.playbookQueue.length > 0) {
           const next = this.playbookQueue.shift();
           setTimeout(() => this.runPlaybook(next), 500);

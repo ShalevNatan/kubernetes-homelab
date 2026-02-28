@@ -10,15 +10,27 @@ Design decisions made here:
 - Ansible is invoked via wsl.exe with an explicit distro name.
 - Errors in the subprocess surface as log lines to the browser — the server
   does not crash, and the operator can see exactly what failed.
+
+Windows asyncio note:
+  asyncio.create_subprocess_exec is unreliable on Windows when running inside
+  uvicorn's worker (ProactorEventLoop), producing silent failures with no
+  traceback. stream_subprocess therefore uses subprocess.Popen executed in the
+  default thread pool, posting output lines back to the event loop via an
+  asyncio.Queue and loop.call_soon_threadsafe. This is the standard Windows-
+  safe pattern for async subprocess streaming.
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import subprocess
+import traceback
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
+
+_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Global execution lock
@@ -73,29 +85,74 @@ async def stream_subprocess(
 
     Both stdout and stderr are merged — the operator sees everything in order.
     A final sentinel line reports the exit code.
-    """
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,  # merge stderr into stdout
-        cwd=cwd,
-        env=env,
-    )
 
-    assert proc.stdout is not None  # guaranteed when PIPE is set
+    Implementation note: subprocess.Popen is run in a thread pool rather than
+    using asyncio.create_subprocess_exec, which fails silently on Windows
+    inside uvicorn's ProactorEventLoop worker. Lines are posted from the
+    worker thread to the event loop via asyncio.Queue + call_soon_threadsafe.
+    """
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def _run_in_thread() -> None:
+        """Blocking subprocess reader — runs in the default thread pool.
+
+        Reads stdout line-by-line (stderr merged into stdout) and enqueues
+        each decoded line on the asyncio event loop. Posts None as the end-of-
+        stream sentinel once the process has exited.
+        """
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,  # merge stderr into stdout
+                cwd=cwd,
+                env=env,
+            )
+            assert proc.stdout is not None  # guaranteed when PIPE is set
+
+            for raw_line in proc.stdout:
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                loop.call_soon_threadsafe(queue.put_nowait, line)
+
+            proc.wait()
+
+            if proc.returncode == 0:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    "[EXIT] Process finished successfully (exit code 0)",
+                )
+            else:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    f"[EXIT] Process failed with exit code {proc.returncode}",
+                )
+
+        except Exception:
+            tb = traceback.format_exc()
+            _log.error("stream_subprocess thread raised:\n%s", tb)
+            # Surface the last line of the traceback to the browser so the
+            # operator sees a meaningful message rather than an empty [ERROR].
+            last_tb_line = tb.strip().splitlines()[-1]
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                f"[ERROR] Subprocess failed to start: {last_tb_line}",
+            )
+
+        finally:
+            # None is the end-of-stream sentinel for the async consumer.
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+    # Run the blocking reader in the default thread pool. We rely on the None
+    # sentinel rather than awaiting the returned Future — any exception inside
+    # _run_in_thread is caught and enqueued above.
+    loop.run_in_executor(None, _run_in_thread)
 
     while True:
-        line = await proc.stdout.readline()
-        if not line:
+        item = await queue.get()
+        if item is None:
             break
-        yield line.decode("utf-8", errors="replace").rstrip("\r\n")
-
-    await proc.wait()
-
-    if proc.returncode == 0:
-        yield "[EXIT] Process finished successfully (exit code 0)"
-    else:
-        yield f"[EXIT] Process failed with exit code {proc.returncode}"
+        yield item
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +191,11 @@ async def run_powershell(
             async for line in stream_subprocess(cmd):
                 await websocket.send_text(line)
 
-    except Exception as exc:
-        await websocket.send_text(f"[ERROR] Unexpected error: {exc}")
+    except Exception:
+        tb = traceback.format_exc()
+        _log.error("run_powershell raised:\n%s", tb)
+        last_tb_line = tb.strip().splitlines()[-1]
+        await websocket.send_text(f"[ERROR] Unexpected error: {last_tb_line}")
 
 
 # ---------------------------------------------------------------------------
