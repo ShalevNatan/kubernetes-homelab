@@ -565,13 +565,15 @@
           vm-config.yaml. Deprovision destroys all cluster VMs — irreversible.
         </p>
         <div class="provision-actions">
-          <button class="btn btn-primary"
-                  :disabled="busy"
+          <button class="btn"
+                  :class="busy || vmsProvisioned ? 'btn-ghost' : 'btn-primary'"
+                  :disabled="busy || vmsProvisioned"
                   @click="startProvision()">
             ▶ Provision
           </button>
-          <button class="btn btn-danger"
-                  :disabled="busy"
+          <button class="btn"
+                  :class="busy || !vmsProvisioned ? 'btn-ghost' : 'btn-danger'"
+                  :disabled="busy || !vmsProvisioned"
                   @click="showDeprovisionConfirm = true">
             ✕ Deprovision
           </button>
@@ -790,6 +792,12 @@ function dashboard() {
     showDeprovisionConfirm: false,
     configSaveMsg: '',
     playbookQueue: [],
+
+    // True when at least one VM exists on disk (state !== 'not_provisioned').
+    // Drives Provision/Deprovision button availability: only one is valid at a time.
+    get vmsProvisioned() {
+      return this.vms.some(vm => vm.state !== 'not_provisioned');
+    },
 
     // -----------------------------------------------------------------------
     // Lifecycle
