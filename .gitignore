@@ -157,6 +157,10 @@ target/
 # ============================================
 # Project-Specific
 # ============================================
+# Lab dashboard runtime files — generated at startup/provision time, not source
+tools/lab-dashboard/run-state.json
+tools/lab-dashboard/vm-config.json
+
 # Private context file (not for public Git)
 .project-state.md
 .notes/
