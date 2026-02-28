@@ -54,6 +54,25 @@ vm_config:
   path: "D:\\kubernetes-homelab\\tools\\lab-dashboard\\vm-config.yaml"
 
 # ---------------------------------------------------------------------------
+# VMware Windows services to monitor
+#
+# These are queried via Get-Service on the host at each poll interval.
+# Add or remove entries here without touching any backend code.
+# display_name is shown in the UI; name is the Windows service name.
+# ---------------------------------------------------------------------------
+vmware_services:
+  - name: "VMAuthdService"
+    display_name: "Authorization"
+  - name: "VMnetDHCP"
+    display_name: "DHCP"
+  - name: "VMUSBArbService"
+    display_name: "USB Arbitration"
+  - name: "VMware NAT Service"
+    display_name: "NAT"
+  - name: "VmwareAutostartService"
+    display_name: "Autostart"
+
+# ---------------------------------------------------------------------------
 # Dashboard server
 # ---------------------------------------------------------------------------
 server:

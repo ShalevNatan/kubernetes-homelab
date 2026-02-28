@@ -105,6 +105,9 @@ powershell = _PowerShellConfig()
 server = _ServerConfig()
 vm_config_path = _VM_CONFIG_PATH
 
+# Optional — empty list if section absent so services endpoint degrades gracefully
+vmware_services: list[dict] = _raw_config.get("vmware_services", [])
+
 
 # ---------------------------------------------------------------------------
 # VM config loader (called on demand — it can be reloaded at runtime)
