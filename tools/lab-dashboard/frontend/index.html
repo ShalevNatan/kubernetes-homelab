@@ -683,7 +683,7 @@
           <template x-for="(pb, idx) in playbooks" :key="pb.name">
             <div class="pipeline-stage"
                  :class="pb.last_result === 'success' ? 'done' : (pb.last_result === 'failed' ? 'failed' : '')">
-              <div class="stage-circle" x-text="idx + 1"></div>
+              <div class="stage-circle" x-text="idx"></div>
               <div class="stage-label" :title="pb.label" x-text="pb.label.replace(/^\d+-/, '')"></div>
             </div>
           </template>
