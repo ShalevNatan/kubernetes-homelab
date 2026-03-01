@@ -25,6 +25,7 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -34,9 +35,6 @@ from backend import config, executor
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/vm-metrics", tags=["vm_metrics"])
-
-# SSH user — must match the Ubuntu VM template's default user.
-_SSH_USER = "ubuntu"
 
 # Single shell command that collects all metrics in one SSH round trip.
 # Order matters — _parse_output relies on nproc always being the first line.
@@ -52,6 +50,32 @@ _COLLECT_CMD = "nproc; free -m; df -h /; cat /proc/loadavg; uptime -p"
 # does not block the endpoint for more than this long. run_sync's timeout
 # is set to +3s to allow the remote command to complete after connecting.
 _SSH_CONNECT_TIMEOUT = 5
+
+
+def _read_ssh_config() -> tuple[str, str | None]:
+    """Read ansible_user and ansible_ssh_private_key_file from the inventory.
+
+    The Ansible inventory is the single source of truth for SSH credentials —
+    we read it here rather than duplicating those values in config.yaml.
+    Falls back to ("ubuntu", None) if the inventory is missing or unreadable.
+    """
+    try:
+        inv_path = Path(config.ansible.inventory_path)
+        if not inv_path.exists():
+            _log.warning("Inventory not found at %s — using default SSH user", inv_path)
+            return "ubuntu", None
+
+        content = inv_path.read_text(encoding="utf-8")
+        user_m = re.search(r'^ansible_user\s*=\s*(\S+)', content, re.MULTILINE)
+        key_m  = re.search(r'^ansible_ssh_private_key_file\s*=\s*(\S+)', content, re.MULTILINE)
+
+        user = user_m.group(1) if user_m else "ubuntu"
+        key  = key_m.group(1)  if key_m  else None
+        return user, key
+
+    except Exception as exc:
+        _log.warning("Could not read SSH config from inventory: %s", exc)
+        return "ubuntu", None
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +113,11 @@ class VMMetricsResponse(BaseModel):
 # SSH collection
 # ---------------------------------------------------------------------------
 
-def _collect_one(name: str, ip: str) -> VMMetrics:
+def _collect_one(name: str, ip: str, ssh_user: str, ssh_key: str | None) -> VMMetrics:
     """SSH into a single VM and collect resource metrics.
 
-    Uses WSL2 as the SSH transport — the same path Ansible takes, so no
-    additional key configuration is needed.
+    Uses WSL2 as the SSH transport with the same user and key that Ansible
+    uses — credentials are read from the inventory, not hardcoded here.
 
     Returns VMMetrics with reachable=False if the connection fails or times
     out. All metric fields are None in that case.
@@ -105,9 +129,11 @@ def _collect_one(name: str, ip: str) -> VMMetrics:
         "-o", f"ConnectTimeout={_SSH_CONNECT_TIMEOUT}",
         "-o", "StrictHostKeyChecking=no",
         "-o", "BatchMode=yes",   # never prompt — fail fast instead
-        f"{_SSH_USER}@{ip}",
-        _COLLECT_CMD,
     ]
+    if ssh_key:
+        # Key path uses WSL2 home (~) — SSH runs inside WSL2 so ~ resolves correctly
+        cmd += ["-i", ssh_key]
+    cmd += [f"{ssh_user}@{ip}", _COLLECT_CMD]
 
     rc, output = executor.run_sync(cmd, timeout=_SSH_CONNECT_TIMEOUT + 3)
 
@@ -226,6 +252,10 @@ def get_vm_metrics() -> VMMetricsResponse:
             collected_at=datetime.now(tz=timezone.utc).isoformat(),
         )
 
+    # Read SSH user + key from the inventory once — same credentials Ansible uses.
+    ssh_user, ssh_key = _read_ssh_config()
+    _log.debug("VM metrics SSH: user=%s key=%s", ssh_user, ssh_key)
+
     # Record insertion order so we can sort results back into it regardless
     # of which SSH call finishes first.
     order = {name: i for i, (name, _) in enumerate(vms_to_query)}
@@ -233,7 +263,7 @@ def get_vm_metrics() -> VMMetricsResponse:
 
     with ThreadPoolExecutor(max_workers=len(vms_to_query)) as pool:
         futures = {
-            pool.submit(_collect_one, name, ip): name
+            pool.submit(_collect_one, name, ip, ssh_user, ssh_key): name
             for name, ip in vms_to_query
         }
         for future in as_completed(futures):
