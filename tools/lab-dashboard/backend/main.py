@@ -24,7 +24,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import config, executor  # config validates config.yaml at import time
-from backend.routers import playbooks, provision, services, vm_config, vms
+from backend.routers import playbooks, provision, services, vm_config, vm_metrics, vms
 
 # ---------------------------------------------------------------------------
 # Startup validation
@@ -92,6 +92,7 @@ app.include_router(provision.router)
 app.include_router(playbooks.router)
 app.include_router(vm_config.router)
 app.include_router(services.router)
+app.include_router(vm_metrics.router)
 
 # ---------------------------------------------------------------------------
 # Frontend static files

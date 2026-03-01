@@ -422,6 +422,84 @@
     .start-unknown   { background: #2a2d3e; color: var(--muted); }
 
     /* -----------------------------------------------------------------------
+       VM Resource Monitor Panel
+    ----------------------------------------------------------------------- */
+    .metrics-panel { grid-column: 1 / -1; }
+
+    .metrics-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .metrics-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      padding: 0 10px 8px;
+    }
+
+    .metrics-table td {
+      padding: 10px;
+      border-top: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .metrics-vm-name { font-weight: 600; font-size: 13px; }
+    .metrics-ip      { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+    /* Meter bar — reusable progress bar for RAM and disk */
+    .meter-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+      width: 100%;
+      margin-bottom: 4px;
+      min-width: 120px;
+    }
+
+    .meter-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    .meter-green  { background: var(--green); }
+    .meter-yellow { background: var(--yellow); }
+    .meter-red    { background: var(--red); }
+
+    .metrics-label {
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .load-value  { font-family: var(--font-mono); font-size: 12px; }
+    .load-green  { color: var(--green); }
+    .load-yellow { color: var(--yellow); }
+    .load-red    { color: var(--red); }
+
+    .metrics-offline { font-size: 12px; color: var(--muted); font-style: italic; }
+
+    /* Pulsing live indicator dot */
+    .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--green);
+      box-shadow: 0 0 6px var(--green);
+      animation: pulse-glow 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 4px var(--green); }
+      50%       { box-shadow: 0 0 12px var(--green); }
+    }
+
+    /* -----------------------------------------------------------------------
        Log Console
     ----------------------------------------------------------------------- */
     .log-console {
@@ -549,6 +627,105 @@
             </div>
           </template>
         </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         VM Resource Monitor (full width, between VM Status and Lifecycle)
+    =================================================================== -->
+    <div class="card metrics-panel">
+      <div class="card-header">
+        <span class="card-title">VM Resources</span>
+        <div class="flex-row">
+          <div class="live-dot"></div>
+          <span class="text-muted">live · 60s</span>
+          <span class="text-muted" x-show="vmMetricsUpdatedAt"
+                x-text="'· ' + vmMetricsUpdatedAt"></span>
+        </div>
+      </div>
+      <div class="card-body">
+        <template x-if="vmMetrics.length === 0">
+          <p class="text-muted">Collecting metrics…</p>
+        </template>
+        <template x-if="vmMetrics.length > 0">
+          <table class="metrics-table">
+            <thead>
+              <tr>
+                <th>VM</th>
+                <th>CPU</th>
+                <th style="min-width:180px;">RAM</th>
+                <th style="min-width:180px;">Disk (/)</th>
+                <th>Uptime</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="m in vmMetrics" :key="m.name">
+                <tr>
+                  <!-- VM name + IP -->
+                  <td>
+                    <div class="metrics-vm-name" x-text="m.name"></div>
+                    <div class="metrics-ip" x-text="m.ip"></div>
+                  </td>
+
+                  <!-- CPU threads + load average (colour-coded vs thread count) -->
+                  <td>
+                    <template x-if="!m.reachable">
+                      <span class="metrics-offline">offline</span>
+                    </template>
+                    <template x-if="m.reachable">
+                      <div>
+                        <div class="metrics-label"
+                             x-text="(m.cpu_threads ?? '?') + ' threads'"></div>
+                        <div class="load-value" :class="loadColor(m)"
+                             x-text="m.load_1m !== null ? 'load ' + m.load_1m.toFixed(2) : '—'"></div>
+                      </div>
+                    </template>
+                  </td>
+
+                  <!-- RAM with meter bar -->
+                  <td>
+                    <template x-if="!m.reachable">
+                      <span class="metrics-offline">—</span>
+                    </template>
+                    <template x-if="m.reachable">
+                      <div>
+                        <div class="meter-track">
+                          <div class="meter-fill" :class="ramColor(m)"
+                               :style="'width:' + ramPct(m) + '%'"></div>
+                        </div>
+                        <div class="metrics-label"
+                             x-text="ramLabel(m) + ' (' + ramPct(m) + '%)'"></div>
+                      </div>
+                    </template>
+                  </td>
+
+                  <!-- Disk with meter bar -->
+                  <td>
+                    <template x-if="!m.reachable">
+                      <span class="metrics-offline">—</span>
+                    </template>
+                    <template x-if="m.reachable">
+                      <div>
+                        <div class="meter-track">
+                          <div class="meter-fill" :class="diskColor(m)"
+                               :style="'width:' + (m.disk_use_pct ?? 0) + '%'"></div>
+                        </div>
+                        <div class="metrics-label"
+                             x-text="(m.disk_used ?? '?') + ' / ' + (m.disk_total ?? '?') + ' (' + (m.disk_use_pct ?? '?') + '%)'"></div>
+                      </div>
+                    </template>
+                  </td>
+
+                  <!-- Uptime -->
+                  <td>
+                    <span class="metrics-label"
+                          x-text="m.reachable ? (m.uptime ?? '—') : '—'"></span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </template>
       </div>
     </div>
 
@@ -777,6 +954,7 @@ function dashboard() {
   // which interferes with their native behaviour and causes premature disconnects.
   let _activeWS = null;
   let _pollTimer = null;
+  let _metricsTimer = null;
 
   return {
     // -----------------------------------------------------------------------
@@ -786,6 +964,8 @@ function dashboard() {
     services: [],
     playbooks: [],
     vmConfig: [],
+    vmMetrics: [],
+    vmMetricsUpdatedAt: '',
     logLines: [],
     busy: false,
     currentOp: '',
@@ -807,8 +987,14 @@ function dashboard() {
       await this.loadPlaybooks();
       await this.loadVMConfig();
       await this.loadServices();
+      // VM metrics: fire without await — SSH calls can take up to 5s per node
+      // on an offline VM, so we let this load in the background rather than
+      // blocking the rest of the init sequence.
+      this.loadVMMetrics();
       // Poll VM status and host services every 10 seconds
       _pollTimer = setInterval(() => { this.refreshVMs(); this.loadServices(); }, 10_000);
+      // Poll VM resource metrics every 60 seconds — SSH is heavier than vmrun
+      _metricsTimer = setInterval(() => this.loadVMMetrics(), 60_000);
     },
 
     // -----------------------------------------------------------------------
@@ -967,6 +1153,57 @@ function dashboard() {
       } catch (e) {
         this.configSaveMsg = '✗ ' + e.message;
       }
+    },
+
+    // -----------------------------------------------------------------------
+    // VM resource metrics
+    // -----------------------------------------------------------------------
+    async loadVMMetrics() {
+      try {
+        const res  = await fetch('/api/vm-metrics');
+        const data = await res.json();
+        this.vmMetrics = data.vms;
+        // Convert the server's UTC ISO timestamp to local time for display
+        this.vmMetricsUpdatedAt = new Date(data.collected_at).toLocaleTimeString();
+      } catch (e) {
+        this.appendLog('[ERROR] Failed to load VM metrics: ' + e.message);
+      }
+    },
+
+    // Load average colour — green when load is low relative to thread count,
+    // yellow when approaching saturation, red when at or above thread count.
+    loadColor(m) {
+      if (!m.reachable || m.load_1m === null || !m.cpu_threads) return '';
+      const ratio = m.load_1m / m.cpu_threads;
+      if (ratio >= 1.0) return 'load-red';
+      if (ratio >= 0.5) return 'load-yellow';
+      return 'load-green';
+    },
+
+    ramPct(m) {
+      if (!m.reachable || !m.ram_total_mb) return 0;
+      return Math.min(100, Math.round((m.ram_used_mb / m.ram_total_mb) * 100));
+    },
+
+    ramLabel(m) {
+      if (!m.reachable) return '—';
+      const used  = (m.ram_used_mb  / 1024).toFixed(1);
+      const total = (m.ram_total_mb / 1024).toFixed(1);
+      return `${used} / ${total} GB`;
+    },
+
+    ramColor(m) {
+      const p = this.ramPct(m);
+      if (p >= 90) return 'meter-red';
+      if (p >= 70) return 'meter-yellow';
+      return 'meter-green';
+    },
+
+    diskColor(m) {
+      const p = m.disk_use_pct ?? 0;
+      if (p >= 90) return 'meter-red';
+      if (p >= 70) return 'meter-yellow';
+      return 'meter-green';
     },
 
     // -----------------------------------------------------------------------
