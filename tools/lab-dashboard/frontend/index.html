@@ -631,7 +631,36 @@
     </div>
 
     <!-- ===================================================================
-         VM Resource Monitor (full width, between VM Status and Lifecycle)
+         Provision / Deprovision Panel
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Lifecycle</span>
+      </div>
+      <div class="card-body">
+        <p class="text-muted" style="margin-bottom:14px;">
+          Provision clones VMs from the template snapshot using specs from
+          vm-config.yaml. Deprovision destroys all cluster VMs — irreversible.
+        </p>
+        <div class="provision-actions">
+          <button class="btn"
+                  :class="busy || vmsProvisioned ? 'btn-ghost' : 'btn-primary'"
+                  :disabled="busy || vmsProvisioned"
+                  @click="startProvision()">
+            ▶ Provision
+          </button>
+          <button class="btn"
+                  :class="busy || !vmsProvisioned ? 'btn-ghost' : 'btn-danger'"
+                  :disabled="busy || !vmsProvisioned"
+                  @click="showDeprovisionConfirm = true">
+            ✕ Deprovision
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         VM Resource Monitor (full width)
     =================================================================== -->
     <div class="card metrics-panel">
       <div class="card-header">
@@ -730,69 +759,6 @@
     </div>
 
     <!-- ===================================================================
-         Provision / Deprovision Panel
-    =================================================================== -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Lifecycle</span>
-      </div>
-      <div class="card-body">
-        <p class="text-muted" style="margin-bottom:14px;">
-          Provision clones VMs from the template snapshot using specs from
-          vm-config.yaml. Deprovision destroys all cluster VMs — irreversible.
-        </p>
-        <div class="provision-actions">
-          <button class="btn"
-                  :class="busy || vmsProvisioned ? 'btn-ghost' : 'btn-primary'"
-                  :disabled="busy || vmsProvisioned"
-                  @click="startProvision()">
-            ▶ Provision
-          </button>
-          <button class="btn"
-                  :class="busy || !vmsProvisioned ? 'btn-ghost' : 'btn-danger'"
-                  :disabled="busy || !vmsProvisioned"
-                  @click="showDeprovisionConfirm = true">
-            ✕ Deprovision
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===================================================================
-         Playbook Runner
-    =================================================================== -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Ansible Playbooks</span>
-        <button class="btn btn-ghost btn-sm" @click="loadPlaybooks()">↻</button>
-      </div>
-      <div class="card-body">
-        <template x-if="playbooks.length === 0">
-          <p class="text-muted">No playbooks found.</p>
-        </template>
-        <div class="playbook-list">
-          <template x-for="pb in playbooks" :key="pb.name">
-            <div class="playbook-row">
-              <span class="playbook-label" x-text="pb.label"></span>
-              <span class="result-badge" :class="'result-' + pb.last_result"
-                    x-text="pb.last_result"></span>
-              <button class="btn btn-primary btn-sm"
-                      :disabled="busy"
-                      @click="runPlaybook(pb.name)">Run</button>
-            </div>
-          </template>
-        </div>
-        <div class="mt-8 flex-row">
-          <button class="btn btn-ghost btn-sm"
-                  :disabled="busy || playbooks.length === 0"
-                  @click="runAllPlaybooks()">Run All in Order</button>
-          <span class="text-muted" x-show="playbookQueue.length > 0"
-                x-text="'Queue: ' + playbookQueue.length + ' remaining'"></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- ===================================================================
          Config Editor
     =================================================================== -->
     <div class="card">
@@ -844,6 +810,40 @@
             </div>
           </div>
         </template>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         Playbook Runner
+    =================================================================== -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Ansible Playbooks</span>
+        <button class="btn btn-ghost btn-sm" @click="loadPlaybooks()">↻</button>
+      </div>
+      <div class="card-body">
+        <template x-if="playbooks.length === 0">
+          <p class="text-muted">No playbooks found.</p>
+        </template>
+        <div class="playbook-list">
+          <template x-for="pb in playbooks" :key="pb.name">
+            <div class="playbook-row">
+              <span class="playbook-label" x-text="pb.label"></span>
+              <span class="result-badge" :class="'result-' + pb.last_result"
+                    x-text="pb.last_result"></span>
+              <button class="btn btn-primary btn-sm"
+                      :disabled="busy"
+                      @click="runPlaybook(pb.name)">Run</button>
+            </div>
+          </template>
+        </div>
+        <div class="mt-8 flex-row">
+          <button class="btn btn-ghost btn-sm"
+                  :disabled="busy || playbooks.length === 0"
+                  @click="runAllPlaybooks()">Run All in Order</button>
+          <span class="text-muted" x-show="playbookQueue.length > 0"
+                x-text="'Queue: ' + playbookQueue.length + ' remaining'"></span>
+        </div>
       </div>
     </div>
 
