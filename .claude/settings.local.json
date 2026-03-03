@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(git push:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(python:*)",
+      "Bash(wsl.exe:*)"
     ]
   }
 }

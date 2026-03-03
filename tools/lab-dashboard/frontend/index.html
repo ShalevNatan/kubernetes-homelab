@@ -206,6 +206,8 @@
     .btn-warning  { background: #78350f; color: var(--yellow); border-color: #78350f; }
     .btn-ghost    { background: transparent; color: var(--muted); border-color: var(--border); }
     .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: var(--text); }
+    .btn-info     { background: #1e3a8a; color: #93c5fd; border-color: #1e3a8a; }
+    .btn-info:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
     .btn-sm       { padding: 3px 8px; font-size: 11px; }
 
     /* -----------------------------------------------------------------------
@@ -623,6 +625,9 @@
                 <button class="btn btn-ghost btn-sm"
                         :disabled="busy || vm.state !== 'running'"
                         @click="vmAction(vm.name, 'restart')">Restart</button>
+                <button class="btn btn-info btn-sm"
+                        :disabled="vm.state !== 'running'"
+                        @click="openShell(vm.name, vm.planned_ip)">Shell</button>
               </div>
             </div>
           </template>
@@ -1022,6 +1027,21 @@ function dashboard() {
         } else {
           this.appendLog(`[SUCCESS] ${name}: ${action} OK`);
           await this.refreshVMs();
+        }
+      } catch (e) {
+        this.appendLog('[ERROR] ' + e.message);
+      }
+    },
+
+    async openShell(name, ip) {
+      this.appendLog(`[INFO] Opening shell → ${name} (${ip})…`);
+      try {
+        const res = await fetch(`/api/vms/${name}/shell`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          this.appendLog(`[ERROR] ${data.detail}`);
+        } else {
+          this.appendLog(`[SUCCESS] CMD window opened for ${name} (${ip})`);
         }
       } catch (e) {
         this.appendLog('[ERROR] ' + e.message);

@@ -13,6 +13,7 @@ full provision script — these are runtime power operations, not provisioning).
 from __future__ import annotations
 
 import os
+import subprocess
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -173,3 +174,34 @@ def restart_vm(name: str) -> dict:
         raise HTTPException(status_code=500, detail=f"vmrun reset failed: {output.strip()}")
 
     return {"status": "ok", "vm": name, "action": "restart"}
+
+
+# ---------------------------------------------------------------------------
+# POST /api/vms/{name}/shell
+# ---------------------------------------------------------------------------
+
+@router.post("/{name}/shell")
+def open_shell(name: str) -> dict:
+    """Open a new CMD window on the host and SSH into the VM.
+
+    Uses CREATE_NEW_CONSOLE so the window is fully independent — it stays
+    open even after the dashboard is closed, and closing it has no effect
+    on the backend process.
+    """
+    vm_cfg = config.load_vm_config()
+    vm = next((v for v in vm_cfg.get("vms", []) if v["name"] == name), None)
+    if vm is None:
+        raise HTTPException(status_code=404, detail=f"VM '{name}' not found in config")
+
+    ip = vm.get("planned_ip", "")
+    if not ip:
+        raise HTTPException(status_code=400, detail=f"VM '{name}' has no planned_ip configured")
+
+    # /k keeps the window open so the user can work interactively.
+    # %USERPROFILE% is expanded by cmd.exe before invoking ssh.
+    subprocess.Popen(
+        ["cmd.exe", "/k", f"ssh -i %USERPROFILE%\\.ssh\\homelab_wsl filwen@{ip}"],
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
+    )
+
+    return {"status": "ok", "vm": name, "ip": ip}
