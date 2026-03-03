@@ -1,0 +1,395 @@
+---
+# Stage 3, Phase 4: Initialize Kubernetes Control Plane
+# Purpose: Run kubeadm init on master node, configure kubectl access
+# Duration: ~3-5 minutes execution time
+# Prerequisites: Phase 3 complete (Kubernetes packages installed)
+# Idempotent: Safe to re-run multiple times (checks cluster state before initializing)
+
+- name: Initialize Kubernetes control plane on master node
+  hosts: k8s-master-01
+  become: true
+  vars:
+    # Kubernetes configuration
+    kubernetes_version: "1.34.3"
+    pod_network_cidr: "192.168.0.0/16"  # Calico default (must match Phase 5)
+    api_server_advertise_address: "192.168.70.10"  # Master node IP
+    
+    # Paths
+    kubeadm_config_path: "/tmp/kubeadm-config.yaml"
+    admin_conf_path: "/etc/kubernetes/admin.conf"
+    kubelet_conf_path: "/var/lib/kubelet/config.yaml"
+    
+    # User configuration
+    cluster_user: "filwen"
+    cluster_user_home: "/home/filwen"
+
+  tasks:
+    # ============================================================================
+    # TASK GROUP 1: Pre-Flight Checks
+    # Purpose: Verify prerequisites before attempting cluster initialization
+    # ============================================================================
+
+    - name: Verify kubelet is installed (Phase 3 prerequisite)
+      ansible.builtin.command: kubelet --version
+      register: kubelet_check
+      changed_when: false
+      failed_when: kubelet_check.rc != 0
+      # What this does: Confirms Phase 3 completed successfully
+      # Why: kubeadm init requires kubelet to be installed
+      # Failure: Indicates Phase 3 was skipped or failed
+
+    - name: Verify kubeadm is installed (Phase 3 prerequisite)
+      ansible.builtin.command: kubeadm version -o short
+      register: kubeadm_check
+      changed_when: false
+      failed_when: kubeadm_check.rc != 0
+      # What this does: Confirms kubeadm bootstrap tool is available
+      # Why: Can't initialize cluster without kubeadm
+
+    - name: Verify containerd is running (Phase 2 prerequisite)
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+      check_mode: yes
+      register: containerd_check
+      # What this does: Ensures container runtime is operational
+      # Why: Control plane pods need containerd to start
+      # check_mode: Doesn't actually start it, just checks status
+
+    - name: Check if cluster is already initialized
+      ansible.builtin.stat:
+        path: "{{ admin_conf_path }}"
+      register: cluster_initialized
+      # What this does: Checks for /etc/kubernetes/admin.conf existence
+      # Why this file: Created by kubeadm init, proves cluster exists
+      # Idempotency key: If exists, skip initialization (safe re-run)
+
+    - name: Check kubelet configuration exists
+      ansible.builtin.stat:
+        path: "{{ kubelet_conf_path }}"
+      register: kubelet_configured
+      # What this does: Checks if kubelet has cluster-specific config
+      # Why: Detects partial initialization or kubeadm reset scenarios
+
+    - name: Display cluster initialization status
+      ansible.builtin.debug:
+        msg: |
+          Cluster Status:
+          - Initialized: {{ cluster_initialized.stat.exists }}
+          - kubelet configured: {{ kubelet_configured.stat.exists }}
+          - Action: {{ 'SKIP initialization (cluster exists)' if cluster_initialized.stat.exists else 'INITIALIZE cluster (first run)' }}
+      # What this does: Shows current state before proceeding
+      # Portfolio value: Demonstrates operational transparency
+
+    # ============================================================================
+    # TASK GROUP 2: kubeadm Configuration File
+    # Purpose: Generate kubeadm init configuration with cluster parameters
+    # ============================================================================
+
+    - name: Create kubeadm configuration file
+      ansible.builtin.copy:
+        dest: "{{ kubeadm_config_path }}"
+        content: |
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: InitConfiguration
+          localAPIEndpoint:
+            advertiseAddress: {{ api_server_advertise_address }}
+            bindPort: 6443
+          nodeRegistration:
+            criSocket: unix:///run/containerd/containerd.sock
+            imagePullPolicy: IfNotPresent
+            name: k8s-master-01
+            taints: null
+          ---
+          apiVersion: kubeadm.k8s.io/v1beta4
+          kind: ClusterConfiguration
+          kubernetesVersion: v{{ kubernetes_version }}
+          clusterName: homelab-cluster
+          controlPlaneEndpoint: "{{ api_server_advertise_address }}:6443"
+          networking:
+            dnsDomain: cluster.local
+            podSubnet: {{ pod_network_cidr }}
+            serviceSubnet: 10.96.0.0/12
+          apiServer:
+            timeoutForControlPlane: 4m0s
+          controllerManager: {}
+          dns: {}
+          etcd:
+            local:
+              dataDir: /var/lib/etcd
+          scheduler: {}
+        mode: '0644'
+      when: not cluster_initialized.stat.exists
+      # What this does: Creates kubeadm configuration YAML
+      # 
+      # Key configuration breakdown:
+      # 
+      # InitConfiguration:
+      #   advertiseAddress: IP other nodes use to reach API server (192.168.70.10)
+      #   bindPort: API server port (6443 = Kubernetes standard)
+      #   criSocket: containerd CRI socket path (kubelet uses this)
+      #   taints: null = Allow scheduling pods on master (single-node testing OK)
+      #
+      # ClusterConfiguration:
+      #   kubernetesVersion: Explicit version (1.34.3)
+      #   podSubnet: 192.168.0.0/16 (MUST match Calico default in Phase 5)
+      #   serviceSubnet: 10.96.0.0/12 (ClusterIP service range)
+      #   dnsDomain: cluster.local (default K8s DNS suffix)
+      #
+      # Why explicit config file vs inline flags:
+      #   - Declarative (can review config before init)
+      #   - Reproducible (same config on every run)
+      #   - Version controlled (can track changes)
+      #   - Auditable (know exactly what cluster was initialized with)
+
+    # ============================================================================
+    # TASK GROUP 3: Cluster Initialization
+    # Purpose: Run kubeadm init to bootstrap control plane
+    # ============================================================================
+
+    - name: Initialize Kubernetes control plane with kubeadm
+      ansible.builtin.command: kubeadm init --config={{ kubeadm_config_path }}
+      register: kubeadm_init
+      when: not cluster_initialized.stat.exists
+      # What this does: THE BIG ONE - bootstraps entire control plane
+      # 
+      # What kubeadm init does (6 phases):
+      # 
+      # Phase 1: Preflight checks
+      #   - Verifies swap is disabled
+      #   - Checks kubelet/kubeadm/kubectl versions match
+      #   - Validates container runtime accessible
+      #   - Ensures ports 6443, 2379-2380, 10250-10259 available
+      #
+      # Phase 2: Certificate generation
+      #   Creates 6 certificate pairs in /etc/kubernetes/pki/:
+      #     1. ca.crt/key - Cluster root CA (signs all other certs)
+      #     2. apiserver.crt/key - API server identity
+      #     3. apiserver-kubelet-client.crt/key - API server → kubelet auth
+      #     4. front-proxy-ca.crt/key - Extension API server CA
+      #     5. front-proxy-client.crt/key - Aggregation layer auth
+      #     6. etcd/ca.crt/key - etcd cluster CA
+      #   Validity: 1 year (renewal required, Stage 7 topic)
+      #
+      # Phase 3: Generate kubeconfig files
+      #   Creates 4 config files in /etc/kubernetes/:
+      #     - admin.conf (cluster-admin access)
+      #     - controller-manager.conf
+      #     - scheduler.conf
+      #     - kubelet.conf (node → API server auth)
+      #
+      # Phase 4: Create static pod manifests
+      #   Writes 4 YAML files to /etc/kubernetes/manifests/:
+      #     - etcd.yaml (key-value store for cluster state)
+      #     - kube-apiserver.yaml (REST API for cluster management)
+      #     - kube-controller-manager.yaml (control loops: replication, endpoints, etc.)
+      #     - kube-scheduler.yaml (pod placement decisions)
+      #   kubelet watches this directory, starts pods immediately
+      #
+      # Phase 5: Upload kubeadm/kubelet ConfigMaps
+      #   Stores cluster-wide config in ConfigMaps:
+      #     - kubeadm-config (cluster init parameters)
+      #     - kubelet-config (kubelet settings for all nodes)
+      #   Why: New nodes can download config automatically
+      #
+      # Phase 6: Mark master node as control plane
+      #   Labels: node-role.kubernetes.io/control-plane
+      #   Taints: (none, we set taints: null for homelab)
+      #
+      # Duration: ~60-90 seconds
+      # Output: Prints join command for workers (we'll extract this)
+      # 
+      # Idempotency: when: condition prevents re-run if cluster exists
+
+    - name: Display kubeadm init output
+      ansible.builtin.debug:
+        var: kubeadm_init.stdout_lines
+      when: kubeadm_init is changed
+      # What this does: Shows kubeadm output (cert generation, pod startup, join token)
+      # Why: Useful for troubleshooting, seeing what happened
+      # Only runs: If kubeadm init actually executed (not on re-runs)
+
+    - name: Wait for API server to become ready
+      ansible.builtin.wait_for:
+        host: "{{ api_server_advertise_address }}"
+        port: 6443
+        timeout: 300
+      when: kubeadm_init is changed
+      # What this does: Waits up to 5 minutes for API server to listen on port 6443
+      # Why: Control plane pods take ~30-60s to start
+      # Failure: Indicates control plane startup issue (check kubelet logs)
+
+    # ============================================================================
+    # TASK GROUP 4: kubectl Configuration for Cluster User
+    # Purpose: Set up kubectl access for non-root user (filwen)
+    # ============================================================================
+
+    - name: Create .kube directory for cluster user
+      ansible.builtin.file:
+        path: "{{ cluster_user_home }}/.kube"
+        state: directory
+        owner: "{{ cluster_user }}"
+        group: "{{ cluster_user }}"
+        mode: '0755'
+      # What this does: Creates /home/filwen/.kube/
+      # Why: kubectl looks for config at ~/.kube/config by default
+
+    - name: Copy admin kubeconfig to cluster user
+      ansible.builtin.copy:
+        src: "{{ admin_conf_path }}"
+        dest: "{{ cluster_user_home }}/.kube/config"
+        owner: "{{ cluster_user }}"
+        group: "{{ cluster_user }}"
+        mode: '0600'
+        remote_src: yes
+      # What this does: Copies /etc/kubernetes/admin.conf → /home/filwen/.kube/config
+      # Why: Gives filwen user cluster-admin access via kubectl
+      # Permissions: 0600 (only owner can read, contains cluster credentials)
+      # remote_src: yes = Copy from remote node (not WSL2 to node)
+
+    - name: Verify kubectl can connect to cluster
+      ansible.builtin.command: kubectl --kubeconfig={{ cluster_user_home }}/.kube/config get nodes
+      become_user: "{{ cluster_user }}"
+      register: kubectl_test
+      changed_when: false
+      retries: 5
+      delay: 10
+      until: kubectl_test.rc == 0
+      # What this does: Tests kubectl connectivity as filwen user
+      # Expected: Shows master node (NotReady state - no CNI yet)
+      # Retries: Up to 5 attempts with 10s delays (API server might still be starting)
+      # Failure: Indicates kubeconfig issue or API server not responding
+
+    # ============================================================================
+    # TASK GROUP 5: Extract Join Token for Workers (Phase 6)
+    # Purpose: Generate kubeadm join command for worker nodes
+    # ============================================================================
+
+    - name: Create bootstrap token for worker nodes
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: kubeadm_join_command
+      changed_when: false
+      # What this does: Generates new bootstrap token + prints join command
+      # Output format: kubeadm join 192.168.70.10:6443 --token abc.xyz --discovery-token-ca-cert-hash sha256:...
+      # Token validity: 24 hours by default
+      # Why generate new: Even if cluster existed, old token may be expired
+
+    - name: Save join command to local file
+      ansible.builtin.copy:
+        content: "{{ kubeadm_join_command.stdout }}"
+        dest: /tmp/kubeadm-join-command.txt
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+      # What this does: Saves join command to WSL2 filesystem
+      # Location: /tmp/kubeadm-join-command.txt (on WSL2, not master node)
+      # Why: Phase 6 will read this file to join workers
+      # delegate_to: localhost = Run this task on WSL2, not on master
+
+    - name: Display join command
+      ansible.builtin.debug:
+        msg: |
+          Worker Join Command (save this for Phase 6):
+          {{ kubeadm_join_command.stdout }}
+          
+          Join command saved to: /tmp/kubeadm-join-command.txt
+      # What this does: Shows join command in Ansible output
+      # Portfolio value: Demonstrates operational transparency
+
+    # ============================================================================
+    # TASK GROUP 6: Control Plane Verification
+    # Purpose: Validate cluster health before declaring success
+    # ============================================================================
+
+    - name: Get control plane pods status
+      ansible.builtin.command: kubectl --kubeconfig={{ admin_conf_path }} get pods -n kube-system
+      register: control_plane_pods
+      changed_when: false
+      # What this does: Lists all control plane and system pods
+      # Expected: etcd, apiserver, controller-manager, scheduler = Running
+      #           coredns = Pending (no CNI yet, this is normal)
+
+    - name: Get node status
+      ansible.builtin.command: kubectl --kubeconfig={{ admin_conf_path }} get nodes -o wide
+      register: node_status
+      changed_when: false
+      # What this does: Shows cluster node(s) status
+      # Expected: k8s-master-01 = NotReady (no CNI plugin, expected until Phase 5)
+
+    - name: Check control plane component health
+      ansible.builtin.command: kubectl --kubeconfig={{ admin_conf_path }} get componentstatuses
+      register: component_status
+      changed_when: false
+      failed_when: false
+      # What this does: Shows controller-manager, scheduler, etcd health
+      # Note: Deprecated in K8s 1.19+, may show "not found" (this is OK)
+      # Why still check: Some K8s versions still support it
+
+    - name: Verify etcd is healthy
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ admin_conf_path }} exec -n kube-system etcd-k8s-master-01 -- \
+          etcdctl --endpoints=https://127.0.0.1:2379 \
+          --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+          --cert=/etc/kubernetes/pki/etcd/server.crt \
+          --key=/etc/kubernetes/pki/etcd/server.key \
+          endpoint health
+      register: etcd_health
+      changed_when: false
+      failed_when: false
+      # What this does: Checks etcd cluster health directly
+      # Why: etcd is critical (stores all cluster state)
+      # Expected: "endpoint health: true"
+
+    - name: Display control plane status
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Control Plane Initialization Complete"
+          - "============================================"
+          - "Cluster Status:"
+          - "{{ node_status.stdout_lines }}"
+          - ""
+          - "Control Plane Pods:"
+          - "{{ control_plane_pods.stdout_lines }}"
+          - ""
+          - "Expected State:"
+          - "- Master node: NotReady (CNI not installed yet - Phase 5)"
+          - "- API server: Running ✅"
+          - "- etcd: Running ✅"
+          - "- Controller Manager: Running ✅"
+          - "- Scheduler: Running ✅"
+          - "- CoreDNS: Pending (waiting for CNI)"
+          - ""
+          - "Next Steps:"
+          - "1. Phase 5: Install Calico CNI (nodes will become Ready)"
+          - "2. Phase 6: Join worker nodes using saved join command"
+          - "============================================"
+      # What this does: Human-readable summary with expectations
+      # Why "NotReady" is OK: No CNI installed yet (Phase 5)
+      # Why CoreDNS is Pending: Needs CNI for pod networking
+
+    # ============================================================================
+    # TASK GROUP 7: Post-Initialization Cleanup
+    # Purpose: Clean up temporary files
+    # ============================================================================
+
+    - name: Remove kubeadm config file (cleanup)
+      ansible.builtin.file:
+        path: "{{ kubeadm_config_path }}"
+        state: absent
+      # What this does: Deletes /tmp/kubeadm-config.yaml
+      # Why: No longer needed, config is stored in cluster (kubeadm-config ConfigMap)
+
+# ============================================================================
+# End of playbook
+# 
+# What success looks like:
+# - API server responding on port 6443
+# - Control plane pods Running (etcd, apiserver, controller-manager, scheduler)
+# - CoreDNS pods Pending (normal, waiting for CNI)
+# - Master node NotReady (normal, waiting for CNI)
+# - kubectl working for filwen user
+# - Join command saved for Phase 6
+# 
+# Next phase: Install Calico CNI (Phase 5)
+# ============================================================================

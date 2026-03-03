@@ -1,0 +1,320 @@
+---
+# Stage 3, Phase 6: Join Worker Nodes to Kubernetes Cluster
+# Purpose: Add worker nodes to cluster, expand to 3-node configuration
+# Duration: ~3-5 minutes execution time (both workers join)
+# Prerequisites: Phase 5 complete (Calico CNI installed, master Ready)
+# Idempotent: Safe to re-run multiple times (checks if nodes already joined)
+
+- name: Join worker nodes to Kubernetes cluster
+  hosts: workers
+  become: true
+  vars:
+    # Join command file created by Phase 4
+    join_command_file: "/tmp/kubeadm-join-command.txt"
+    
+    # kubeadm reset options (for cleanup if needed)
+    reset_preflight_checks: true
+
+  tasks:
+    # ============================================================================
+    # TASK GROUP 1: Pre-Flight Checks
+    # Purpose: Verify workers are ready to join cluster
+    # ============================================================================
+
+    - name: Check if node is already part of cluster
+      ansible.builtin.stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf_check
+      # What this does: Checks if kubelet config exists
+      # Why: kubelet.conf is created during kubeadm join (proves node joined)
+      # Idempotency key: Skip join if this file exists
+
+    - name: Display join status for this node
+      ansible.builtin.debug:
+        msg: |
+          Node Join Status: {{ inventory_hostname }}
+          - Already joined: {{ 'Yes (will skip join)' if kubelet_conf_check.stat.exists else 'No (will join now)' }}
+          - Kubelet config exists: {{ kubelet_conf_check.stat.exists }}
+
+    - name: Verify containerd is running
+      ansible.builtin.systemd:
+        name: containerd
+        state: started
+      check_mode: yes
+      register: containerd_check
+      # What this does: Ensures container runtime is operational
+      # Why: kubeadm join requires containerd to be running
+      # Failure: Indicates Phase 2 incomplete on this worker
+
+    - name: Verify kubelet is installed
+      ansible.builtin.command: kubelet --version
+      register: kubelet_check
+      changed_when: false
+      failed_when: kubelet_check.rc != 0
+      # What this does: Confirms kubelet binary exists
+      # Why: kubeadm join requires kubelet package installed
+      # Failure: Indicates Phase 3 incomplete on this worker
+
+    # ============================================================================
+    # TASK GROUP 2: Retrieve Join Command from Master
+    # Purpose: Get the join token generated in Phase 4
+    # ============================================================================
+
+    - name: Copy join command from localhost to worker
+      ansible.builtin.copy:
+        src: "{{ join_command_file }}"
+        dest: /tmp/kubeadm-join-command.sh
+        mode: '0755'
+      when: not kubelet_conf_check.stat.exists
+      # What this does: Copies join command from WSL2 to worker node
+      # Source: /tmp/kubeadm-join-command.txt (created by Phase 4 playbook)
+      # Destination: /tmp/kubeadm-join-command.sh on worker
+      # Why: Worker needs the join token to authenticate with master
+
+    - name: Display join command (for verification)
+      ansible.builtin.command: cat /tmp/kubeadm-join-command.sh
+      register: join_cmd_content
+      changed_when: false
+      when: not kubelet_conf_check.stat.exists
+      # What this does: Shows the actual join command before execution
+      # Portfolio value: Demonstrates operational transparency
+
+    - name: Show join command content
+      ansible.builtin.debug:
+        msg: "{{ join_cmd_content.stdout }}"
+      when: not kubelet_conf_check.stat.exists
+
+    # ============================================================================
+    # TASK GROUP 3: Join Worker to Cluster
+    # Purpose: Execute kubeadm join to add node to cluster
+    # ============================================================================
+
+    - name: Join worker node to Kubernetes cluster
+      ansible.builtin.shell: bash /tmp/kubeadm-join-command.sh
+      register: kubeadm_join
+      when: not kubelet_conf_check.stat.exists
+      # What this does: THE BIG ONE - joins worker to cluster
+      # 
+      # What kubeadm join does:
+      # 
+      # Phase 1: Preflight checks
+      #   - Verifies swap disabled
+      #   - Checks kubelet/kubeadm versions match master
+      #   - Validates container runtime accessible
+      #   - Ensures ports available (10250, 10256, etc.)
+      # 
+      # Phase 2: Discovery (validate master identity)
+      #   - Connects to master API server (192.168.70.10:6443)
+      #   - Validates CA cert hash (prevents MITM attacks)
+      #   - Downloads cluster CA certificate
+      #   - Verifies bootstrap token
+      # 
+      # Phase 3: TLS Bootstrap
+      #   - Generates kubelet client certificate request (CSR)
+      #   - Submits CSR to API server using bootstrap token
+      #   - Controller-manager auto-approves CSR (bootstrap-token RBAC)
+      #   - Receives signed kubelet certificate
+      # 
+      # Phase 4: kubelet Configuration
+      #   - Downloads kubelet config from API server (kubelet-config ConfigMap)
+      #   - Writes /var/lib/kubelet/config.yaml
+      #   - Writes /etc/kubernetes/kubelet.conf (kubeconfig with node cert)
+      #   - Configures kubelet to use systemd cgroup driver (matches containerd)
+      # 
+      # Phase 5: Start kubelet
+      #   - Starts kubelet service
+      #   - kubelet registers node with API server
+      #   - kubelet downloads Calico CNI config
+      #   - Node becomes Ready (CNI functional)
+      # 
+      # Duration: ~30-60 seconds per worker
+      # 
+      # Idempotency: when: condition prevents re-join if already member
+
+    - name: Display kubeadm join output
+      ansible.builtin.debug:
+        msg: "{{ kubeadm_join.stdout_lines }}"
+      when: kubeadm_join is changed
+      # What this does: Shows kubeadm join output (cert download, kubelet start)
+      # Why: Useful for troubleshooting, seeing what happened
+      # Only runs: If kubeadm join actually executed
+
+    # ============================================================================
+    # TASK GROUP 4: Verify Worker Node Join
+    # Purpose: Confirm node successfully joined cluster
+    # ============================================================================
+
+    - name: Wait for kubelet to start and stabilize
+      ansible.builtin.systemd:
+        name: kubelet
+        state: started
+      # What this does: Ensures kubelet service is running
+      # Why: kubelet should auto-start after kubeadm join
+      # Idempotent: If already started, does nothing
+
+    - name: Verify kubelet is running
+      ansible.builtin.command: systemctl is-active kubelet
+      register: kubelet_status
+      changed_when: false
+      failed_when: kubelet_status.stdout != "active"
+      # What this does: Confirms kubelet service is active
+      # Expected: "active" (not "inactive" or "failed")
+      # Failure: Indicates kubelet failed to start (check journalctl -u kubelet)
+
+    - name: Check if CNI config was installed by Calico
+      ansible.builtin.stat:
+        path: /etc/cni/net.d/10-calico.conflist
+      register: worker_cni_check
+      # What this does: Verifies Calico CNI config exists on worker
+      # Why: calico-node DaemonSet should have deployed to this worker
+      # File created by: calico-node pod (runs on every node)
+
+    - name: Verify CNI binary exists
+      ansible.builtin.stat:
+        path: /opt/cni/bin/calico
+      register: worker_cni_binary_check
+      # What this does: Checks if Calico CNI binary exists on worker
+      # Why: kubelet needs this binary to configure pod networking
+
+    - name: Display worker join summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Worker Node Join Complete: {{ inventory_hostname }}"
+          - "============================================"
+          - "Join Status: {{ 'Skipped (already joined)' if kubelet_conf_check.stat.exists else 'SUCCESS (newly joined)' }}"
+          - "kubelet Status: {{ kubelet_status.stdout }}"
+          - "CNI Config: {{ 'EXISTS' if worker_cni_check.stat.exists else 'MISSING' }}"
+          - "CNI Binary: {{ 'EXISTS' if worker_cni_binary_check.stat.exists else 'MISSING' }}"
+          - "============================================"
+
+    # ============================================================================
+    # TASK GROUP 5: Cleanup
+    # Purpose: Remove temporary files
+    # ============================================================================
+
+    - name: Remove join command file (cleanup)
+      ansible.builtin.file:
+        path: /tmp/kubeadm-join-command.sh
+        state: absent
+      # What this does: Deletes join command from worker
+      # Why: Contains bootstrap token (security), no longer needed
+
+# ============================================================================
+# PLAY 2: Verify Cluster State from Master
+# Purpose: Confirm all workers successfully joined and are Ready
+# ============================================================================
+
+- name: Verify cluster state after worker join
+  hosts: k8s-master-01
+  become: false
+  vars:
+    kubeconfig_path: "/home/filwen/.kube/config"
+
+  tasks:
+    - name: Wait for all nodes to be registered
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get nodes --no-headers | wc -l
+      register: node_count
+      changed_when: false
+      retries: 10
+      delay: 5
+      until: node_count.stdout | int == 3
+      # What this does: Waits for 3 nodes to appear (1 master + 2 workers)
+      # Why: Nodes take 10-20 seconds to register after kubeadm join
+      # Expected: "3" (all nodes registered)
+
+    - name: Wait for all nodes to become Ready
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get nodes --no-headers | awk '{print $2}' | grep -v Ready | wc -l
+      register: notready_count
+      changed_when: false
+      retries: 20
+      delay: 5
+      until: notready_count.stdout | int == 0
+      # What this does: Waits for all nodes to report Ready status
+      # Why: Nodes need 30-60 seconds for Calico to configure networking
+      # Expected: "0" (no NotReady nodes)
+
+    - name: Get final cluster node status
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o wide
+      register: final_nodes
+      changed_when: false
+      # What this does: Shows all cluster nodes with details
+      # Expected: 3 nodes (k8s-master-01, k8s-worker-01, k8s-worker-02), all Ready
+
+    - name: Get all pods across all namespaces
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get pods --all-namespaces -o wide
+      register: all_pods
+      changed_when: false
+      # What this does: Shows all pods in cluster
+      # Expected: calico-node on all 3 nodes, CoreDNS running, kube-proxy on all nodes
+
+    - name: Get Calico node status
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get pods -n calico-system -o wide
+      register: calico_pods_final
+      changed_when: false
+      # What this does: Shows Calico pods distribution
+      # Expected: calico-node DaemonSet has 3 pods (1 per node)
+
+    - name: Verify Calico IP pool allocation
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get ippool default-ipv4-ippool -o yaml
+      register: ippool_final
+      changed_when: false
+      # What this does: Shows IP pool configuration and usage
+      # Why: Confirms workers are getting IPs from 192.168.0.0/16 range
+
+    - name: Display final cluster summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Stage 3 Complete: Kubernetes Cluster Ready"
+          - "============================================"
+          - ""
+          - "Cluster Nodes:"
+          - "{{ final_nodes.stdout_lines }}"
+          - ""
+          - "All Pods:"
+          - "{{ all_pods.stdout_lines }}"
+          - ""
+          - "Calico CNI Distribution:"
+          - "{{ calico_pods_final.stdout_lines }}"
+          - ""
+          - "Cluster Summary:"
+          - "- Total Nodes: 3 (1 master + 2 workers)"
+          - "- All Nodes: Ready ✅"
+          - "- CNI Plugin: Calico (VXLANCrossSubnet)"
+          - "- Pod Network: 192.168.0.0/16"
+          - "- Container Runtime: containerd 1.7.29"
+          - "- Kubernetes Version: 1.34.3"
+          - ""
+          - "Ready for Stage 4: Core Services"
+          - "- MetalLB (LoadBalancer)"
+          - "- Storage Provisioner"
+          - "- Ingress Controller"
+          - "============================================"
+
+# ============================================================================
+# End of playbook
+# 
+# What success looks like:
+# - 3 nodes registered and Ready
+# - calico-node running on all 3 nodes
+# - CoreDNS running with IPs from pod network
+# - kube-proxy running on all 3 nodes
+# - kubelet active on all workers
+# - CNI config and binaries on all workers
+# 
+# Verification commands (from master):
+# - kubectl get nodes -o wide (should show 3 Ready nodes)
+# - kubectl get pods --all-namespaces -o wide (all pods Running)
+# - kubectl get pods -n calico-system (calico-node × 3)
+# 
+# Troubleshooting if worker doesn't join:
+# - Check kubelet logs: journalctl -u kubelet -f (on worker)
+# - Check token validity: kubeadm token list (on master)
+# - Verify network: ping 192.168.70.10 (from worker)
+# - Check time sync: timedatectl status (on all nodes)
+# 
+# Stage 3 Complete! 🎉
+# ============================================================================

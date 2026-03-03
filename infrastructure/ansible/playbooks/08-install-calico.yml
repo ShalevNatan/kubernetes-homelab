@@ -1,0 +1,215 @@
+---
+# Stage 3, Phase 5: Install Calico CNI Plugin
+# Purpose: Install Calico for pod networking, enable node Ready state
+# Duration: ~5-7 minutes execution time (operator install + pod startup)
+# Prerequisites: Phase 4 complete (control plane initialized)
+# Idempotent: Safe to re-run multiple times (checks CNI state before installing)
+
+- name: Install Calico CNI on Kubernetes cluster
+  hosts: k8s-master-01
+  become: false
+  vars:
+    calico_version: "v3.29.1"
+    calico_operator_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml"
+    calico_custom_resources_url: "https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/custom-resources.yaml"
+    pod_network_cidr: "192.168.0.0/16"
+    calico_manifests_dir: "/tmp/calico-manifests"
+    kubeconfig_path: "/home/filwen/.kube/config"
+
+  tasks:
+    # ============================================================================
+    # TASK GROUP 1: Pre-Flight Checks
+    # ============================================================================
+
+    - name: Verify kubectl is configured and cluster is accessible
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} cluster-info
+      register: cluster_info
+      changed_when: false
+      failed_when: cluster_info.rc != 0
+
+    - name: Check if Calico is fully installed (calico-system namespace exists)
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace calico-system 2>/dev/null && echo "installed" || echo "not-installed"
+      register: calico_check
+      changed_when: false
+      # Better check: calico-system namespace only exists after full installation
+
+    - name: Check current node status
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+      register: node_status_before
+      changed_when: false
+
+    - name: Display pre-installation status
+      ansible.builtin.debug:
+        msg: |
+          Calico CNI Installation Status:
+          - Calico installed: {{ 'Yes (will skip installation)' if 'installed' in calico_check.stdout else 'No (will install)' }}
+          - Node Ready status before CNI: {{ node_status_before.stdout }}
+          - Expected after install: True (Ready)
+
+    # ============================================================================
+    # TASK GROUP 2: Download Calico Manifests
+    # ============================================================================
+
+    - name: Create directory for Calico manifests
+      ansible.builtin.file:
+        path: "{{ calico_manifests_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Download Calico Tigera Operator manifest
+      ansible.builtin.get_url:
+        url: "{{ calico_operator_url }}"
+        dest: "{{ calico_manifests_dir }}/tigera-operator.yaml"
+        mode: '0644'
+      when: "'not-installed' in calico_check.stdout"
+
+    - name: Download Calico custom resources manifest
+      ansible.builtin.get_url:
+        url: "{{ calico_custom_resources_url }}"
+        dest: "{{ calico_manifests_dir }}/custom-resources.yaml"
+        mode: '0644'
+      when: "'not-installed' in calico_check.stdout"
+
+    - name: Modify Calico custom resources to use correct CIDR
+      ansible.builtin.replace:
+        path: "{{ calico_manifests_dir }}/custom-resources.yaml"
+        regexp: '192\.168\.0\.0/16'
+        replace: '{{ pod_network_cidr }}'
+      when: "'not-installed' in calico_check.stdout"
+
+    # ============================================================================
+    # TASK GROUP 3: Install Calico Operator
+    # ============================================================================
+
+    - name: Apply Calico Tigera Operator (server-side for K8s 1.34 compatibility)
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} apply --server-side -f {{ calico_manifests_dir }}/tigera-operator.yaml
+      register: operator_apply
+      when: "'not-installed' in calico_check.stdout"
+      # Fix: --server-side bypasses client-side annotation size limit
+
+    - name: Wait for Tigera Operator to be ready
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=Available --timeout=300s deployment/tigera-operator -n tigera-operator
+      when: "'not-installed' in calico_check.stdout"
+
+    # ============================================================================
+    # TASK GROUP 4: Install Calico Custom Resources
+    # ============================================================================
+
+    - name: Apply Calico custom resources
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ calico_manifests_dir }}/custom-resources.yaml
+      register: custom_resources_apply
+      when: "'not-installed' in calico_check.stdout"
+
+    - name: Wait for Calico installation to complete
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=Available --timeout=600s deployment/calico-kube-controllers -n calico-system
+      register: calico_wait
+      when: "'not-installed' in calico_check.stdout"
+      retries: 3
+      delay: 10
+      until: calico_wait.rc == 0
+
+    # ============================================================================
+    # TASK GROUP 5: Verify Calico Installation
+    # ============================================================================
+
+    - name: Wait for calico-node DaemonSet to be ready on all nodes
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} rollout status daemonset/calico-node -n calico-system --timeout=300s
+      register: calico_node_status
+      changed_when: false
+
+    - name: Verify CNI config files exist on master node
+      ansible.builtin.stat:
+        path: /etc/cni/net.d/10-calico.conflist
+      register: cni_config_check
+      become: true
+
+    - name: Verify CNI binaries exist on master node
+      ansible.builtin.stat:
+        path: /opt/cni/bin/calico
+      register: cni_binary_check
+      become: true
+
+    - name: Check node Ready status after CNI installation
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}'
+      register: node_status_after
+      changed_when: false
+      retries: 10
+      delay: 5
+      until: node_status_after.stdout == "True"
+
+    - name: Wait for CoreDNS pods to become Running
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=Ready --timeout=300s pod -l k8s-app=kube-dns -n kube-system
+      register: coredns_ready
+      changed_when: false
+
+    - name: Get Calico pod status
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get pods -n calico-system -o wide
+      register: calico_pods
+      changed_when: false
+
+    - name: Get CoreDNS pod status with IPs
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get pods -n kube-system -l k8s-app=kube-dns -o wide
+      register: coredns_pods
+      changed_when: false
+
+    # ============================================================================
+    # TASK GROUP 6: Network Functionality Tests
+    # ============================================================================
+
+    - name: Test pod-to-pod networking (CoreDNS can reach API server)
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} exec -n kube-system $(kubectl --kubeconfig={{ kubeconfig_path }} get pod -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[0].metadata.name}') -- nslookup kubernetes.default
+      register: dns_test
+      changed_when: false
+      failed_when: false
+
+    - name: Verify Calico IP pool configuration
+      ansible.builtin.command: kubectl --kubeconfig={{ kubeconfig_path }} get ippool -o yaml
+      register: ippool_config
+      changed_when: false
+
+    - name: Display installation summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "Calico CNI Installation Complete"
+          - "============================================"
+          - "Node Status Change:"
+          - "  Before CNI: {{ node_status_before.stdout }}"
+          - "  After CNI:  {{ node_status_after.stdout }}"
+          - ""
+          - "CNI Configuration:"
+          - "  CNI config file: {{ 'EXISTS' if cni_config_check.stat.exists else 'MISSING' }} (/etc/cni/net.d/10-calico.conflist)"
+          - "  CNI binary: {{ 'EXISTS' if cni_binary_check.stat.exists else 'MISSING' }} (/opt/cni/bin/calico)"
+          - ""
+          - "Calico Components:"
+          - "{{ calico_pods.stdout_lines }}"
+          - ""
+          - "CoreDNS Status:"
+          - "{{ coredns_pods.stdout_lines }}"
+          - ""
+          - "DNS Functionality:"
+          - "{{ dns_test.stdout_lines if dns_test.rc == 0 else 'DNS test failed (may need retry)' }}"
+          - ""
+          - "Pod Network CIDR: {{ pod_network_cidr }}"
+          - "Encapsulation: VXLANCrossSubnet (VXLAN for cross-subnet traffic)"
+          - "NAT Outgoing: Enabled (SNAT for internet-bound traffic)"
+          - ""
+          - "Next Steps:"
+          - "1. Verify: kubectl get nodes (should show Ready)"
+          - "2. Verify: kubectl get pods -n kube-system (CoreDNS should be Running)"
+          - "3. Phase 6: Join worker nodes to cluster"
+          - "============================================"
+
+    # ============================================================================
+    # TASK GROUP 7: Cleanup
+    # ============================================================================
+
+    - name: Remove Calico manifest directory (cleanup)
+      ansible.builtin.file:
+        path: "{{ calico_manifests_dir }}"
+        state: absent
